@@ -4,13 +4,11 @@ pub mod types;
 use std::sync::Arc;
 
 use teloxide::{
-    Bot,
-    adaptors::DefaultParseMode,
     dispatching::{HandlerExt as _, UpdateFilterExt},
     dptree,
     macros::BotCommands,
-    prelude::{Dispatcher, Requester},
-    types::{ChosenInlineResult, InlineQuery, Update},
+    prelude::Dispatcher,
+    types::Update,
 };
 
 use crate::downloader::Downloader;
@@ -25,7 +23,7 @@ enum Command {
 
 pub async fn run(bot: BotWrapped, downloader: Arc<Downloader>, db: Arc<DatabaseHelper>) {
     let handler = dptree::entry()
-        .inspect(|update: Update| {})
+        .inspect(|_update: Update| {})
         .branch(
             dptree::entry()
                 .filter_command::<Command>()

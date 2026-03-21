@@ -1,5 +1,4 @@
-use anyhow::anyhow;
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Utc};
 use redb::{ReadableDatabase, ReadableTableMetadata as _, TableDefinition};
 use rmp_serde::{decode, encode};
 

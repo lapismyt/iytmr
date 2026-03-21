@@ -2,16 +2,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use teloxide::{
-    Bot,
     dispatching::dialogue::GetChatId,
     prelude::Requester,
-    types::{Message, Update},
+    types::Update,
 };
 
 use crate::{
     bot::{Command, types::BotWrapped},
     db::DatabaseHelper,
-    downloader::Downloader,
 };
 
 pub async fn handle_command(
