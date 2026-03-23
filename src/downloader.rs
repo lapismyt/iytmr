@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use yt_dlp::{
-    extractor::{ExtractorBase, VideoExtractor},
-    model::playlist::Playlist,
-    prelude::*,
+    extractor::VideoExtractor, metadata::MetadataManager, model::playlist::Playlist,
+    model::selector::ThumbnailQuality, prelude::*,
 };
 
 pub struct Downloader {
     client: yt_dlp::Downloader,
-    output_dir: PathBuf,
+    metadata_manager: MetadataManager,
     quality: yt_dlp::model::AudioQuality,
     codec: yt_dlp::model::AudioCodecPreference,
 }
@@ -35,32 +34,65 @@ impl Downloader {
 
         Ok(Self {
             client: downloader,
-            output_dir: PathBuf::from(output_dir.as_ref()),
+            metadata_manager: MetadataManager::new(),
             quality: yt_dlp::model::AudioQuality::Best,
             codec: yt_dlp::model::AudioCodecPreference::Opus,
         })
     }
 
-    pub async fn download(&self, url: &str) -> anyhow::Result<PathBuf> {
-        let video = self.client.youtube_extractor().fetch_video(url).await?;
+    pub async fn download<U: Into<String>>(&self, url: U) -> anyhow::Result<(Video, PathBuf)> {
+        let video = self
+            .client
+            .youtube_extractor()
+            .fetch_video(&url.into())
+            .await?;
 
-        Ok(self
+        let video_id = video.id.clone();
+        let audio_filename = format!("{}.mp3", video_id);
+
+        let audio_path = self
             .client
             .download_audio_stream_with_quality(
                 &video,
-                format!("{}.mp3", video.id),
+                &audio_filename,
                 self.quality,
                 self.codec.clone(),
             )
-            .await?)
-    }
+            .await?;
 
-    pub async fn get_video_metadata(&self, url: &str) -> anyhow::Result<Video> {
-        Ok(self
+        // Add metadata
+        if let Err(e) = self
+            .metadata_manager
+            .add_metadata(&audio_path, &video)
+            .await
+        {
+            log::error!("Failed to add metadata to {}: {}", audio_path.display(), e);
+        }
+
+        // Handle thumbnail
+        let thumbnail_filename = format!("{}.jpg", video_id);
+        match self
             .client
-            .youtube_extractor()
-            .fetch_video_metadata(url)
-            .await?)
+            .download_thumbnail(&video, ThumbnailQuality::Best, &thumbnail_filename)
+            .await
+        {
+            Ok(thumbnail_path) => {
+                if let Err(e) = self
+                    .metadata_manager
+                    .add_thumbnail_to_file(&audio_path, &thumbnail_path)
+                    .await
+                {
+                    log::error!("Failed to add thumbnail to {}: {}", audio_path.display(), e);
+                }
+                // Clean up thumbnail file
+                let _ = tokio::fs::remove_file(thumbnail_path).await;
+            }
+            Err(e) => {
+                log::warn!("Failed to download thumbnail for {}: {}", video_id, e);
+            }
+        }
+
+        Ok((video, audio_path))
     }
 
     pub async fn search(&self, query: &str, max_results: usize) -> anyhow::Result<Playlist> {

@@ -16,7 +16,7 @@ async fn main() {
 
     log::info!("Initializing downloader...");
     let downloader = Arc::new(
-        Downloader::new(consts::OUTPUT_DIR, consts::LIBS_DIR, consts::CACHE_DIR)
+        Downloader::new(consts::OUTPUT_DIR, consts::CACHE_DIR, consts::LIBS_DIR)
             .await
             .unwrap(),
     );
@@ -29,6 +29,7 @@ async fn main() {
         Bot::from_env().parse_mode(ParseMode::Html),
         downloader.clone(),
         db.clone(),
+        Arc::new(crate::bot::types::DataStore::default()),
     )
     .await;
 }
