@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::consts::{MIN_CACHE_SIZE_MB, OUTPUT_DIR};
+use crate::consts::{MAX_CACHE_SIZE_MB, MIN_CACHE_SIZE_MB, OUTPUT_DIR};
 
 #[derive(Debug, Clone)]
 pub struct OutputFolderInfo {
@@ -39,16 +39,27 @@ pub fn get_output_folder_info() -> anyhow::Result<OutputFolderInfo> {
 
 pub fn cache_check() -> anyhow::Result<()> {
     let folder_info = get_output_folder_info()?;
+    if folder_info.total_size < *MAX_CACHE_SIZE_MB * 1024 * 1024 {
+        return Ok(());
+    }
+
+    log::info!(
+        "Max cache size exceeded: {} MB, clearing cache",
+        folder_info.total_size / (1024 * 1024)
+    );
+
     let mut result_size = folder_info.total_size;
     if result_size == 0 {
         return Err(anyhow::anyhow!("Output folder is empty"));
     }
 
+    let min_limit = *MIN_CACHE_SIZE_MB * 1024 * 1024;
+
     let _ = folder_info
         .files
         .iter()
         .map_while(|f| {
-            if result_size <= *MIN_CACHE_SIZE_MB {
+            if result_size <= min_limit {
                 return None;
             }
             if let Err(e) = fs::remove_file(&f.path) {
@@ -62,7 +73,7 @@ pub fn cache_check() -> anyhow::Result<()> {
 
     log::info!(
         "Cleared {} MB of cache",
-        folder_info.total_size - result_size
+        (folder_info.total_size - result_size) / 1024 / 1024
     );
     Ok(())
 }
