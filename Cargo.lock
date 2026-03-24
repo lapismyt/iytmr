@@ -1607,6 +1607,7 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "redb",
+ "regex",
  "reqwest 0.13.2",
  "rmp",
  "rmp-serde",
@@ -1615,6 +1616,7 @@ dependencies = [
  "teloxide",
  "tokio",
  "url",
+ "walkdir",
  "yt-dlp",
 ]
 

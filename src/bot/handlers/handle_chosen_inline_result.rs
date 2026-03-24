@@ -1,19 +1,21 @@
 use std::sync::Arc;
 
 use teloxide::{
-    payloads::EditMessageReplyMarkupInlineSetters,
+    payloads::{EditMessageReplyMarkupInlineSetters, SendAudioSetters},
     prelude::Requester,
     types::{
         ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardButtonKind,
-        InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio,
+        InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio, Me,
     },
 };
 
 use crate::{
     bot::types::{BotWrapped, DataStore},
+    cache::cache_check,
     consts::{MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID},
     db::DatabaseHelper,
     downloader::Downloader,
+    parser::get_title_and_perfomer,
 };
 
 fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> {
@@ -31,7 +33,8 @@ pub async fn handle_chosen_inline_result(
     chosen_inline_result: ChosenInlineResult,
     downloader: Arc<Downloader>,
     db: Arc<DatabaseHelper>,
-    counters: Arc<DataStore>,
+    data_store: Arc<DataStore>,
+    me: Me,
 ) -> anyhow::Result<()> {
     let Some(inline_message_id) = chosen_inline_result.inline_message_id.as_deref() else {
         log::error!("No inline message id for chosen inline result");
@@ -41,7 +44,7 @@ pub async fn handle_chosen_inline_result(
     let user_id = chosen_inline_result.from.id.0;
 
     {
-        let count = counters
+        let count = data_store
             .active_downloads
             .get(&user_id)
             .map(|v| *v)
@@ -60,7 +63,7 @@ pub async fn handle_chosen_inline_result(
         }
     }
 
-    counters
+    data_store
         .active_downloads
         .entry(user_id)
         .and_modify(|v| *v += 1)
@@ -75,7 +78,7 @@ pub async fn handle_chosen_inline_result(
             .await
             .ok();
 
-        counters
+        data_store
             .active_downloads
             .entry(user_id)
             .and_modify(|v| *v -= 1);
@@ -84,56 +87,75 @@ pub async fn handle_chosen_inline_result(
 
     log::info!("Downloading {}...", video_id);
 
-    let Ok((video, download_path)) = downloader.download(&video_id).await else {
+    let Ok((video, download_path, thumbnail_path)) = downloader.download(&video_id).await else {
         log::error!("Failed to download {}", video_id);
         bot.edit_message_text_inline(inline_message_id, "Error: Failed to download audio")
             .await
             .ok();
-        counters
+        data_store
             .active_downloads
             .entry(user_id)
             .and_modify(|v| *v -= 1);
         return Ok(());
     };
+
+    let (title, performer) = get_title_and_perfomer(&video.title, video.uploader.as_deref());
 
     log::info!("Downloaded {}, getting file id", video_id);
 
-    let Ok(tmp_msg) = bot
-        .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(download_path))
-        .await
-    else {
-        log::error!("Failed to get file id for audio");
-        counters
-            .active_downloads
-            .entry(user_id)
-            .and_modify(|v| *v -= 1);
-        return Ok(());
+    let mut send_audio = bot
+        .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
+        .title(title)
+        .performer(performer);
+
+    if let Some(path) = &thumbnail_path {
+        send_audio = send_audio.thumbnail(InputFile::file(path));
+    }
+
+    let tmp_msg = match send_audio.await {
+        Ok(msg) => msg,
+        Err(e) => {
+            log::error!("Failed to get file id for audio: {}", e);
+            data_store
+                .active_downloads
+                .entry(user_id)
+                .and_modify(|v| *v -= 1);
+            return Ok(());
+        }
     };
 
-    let Some(audio) = tmp_msg.audio() else {
-        log::error!("Failed to get audio from message");
-        counters
-            .active_downloads
-            .entry(user_id)
-            .and_modify(|v| *v -= 1);
-        return Ok(());
+    let audio = match tmp_msg.audio() {
+        Some(audio) => audio,
+        None => {
+            log::error!("Failed to get audio from message");
+            data_store
+                .active_downloads
+                .entry(user_id)
+                .and_modify(|v| *v -= 1);
+            return Ok(());
+        }
     };
 
     log::info!("Got file id for audio: {}", &audio.file.id);
 
-    counters
+    data_store
         .active_downloads
         .entry(user_id)
         .and_modify(|v| *v -= 1);
 
-    let input_media_audio = InputMediaAudio::new(InputFile::file_id(audio.file.id.clone()))
-        .caption("")
-        .thumbnail(InputFile::url(url::Url::parse(
-            format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", video_id).as_str(),
-        )?))
+    let mut input_media_audio = InputMediaAudio::new(InputFile::file_id(audio.file.id.clone()))
+        .caption(format!("Downloaded with @{}", me.username()))
         .title(video.title)
         .performer(video.uploader.unwrap_or("???".to_string()))
         .duration(video.duration.unwrap_or(1) as u16);
+
+    if let Some(path) = &thumbnail_path {
+        input_media_audio = input_media_audio.thumbnail(InputFile::file(path));
+    } else {
+        input_media_audio = input_media_audio.thumbnail(InputFile::url(url::Url::parse(
+            format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", video_id).as_str(),
+        )?));
+    }
 
     if let Err(e) = bot
         .edit_message_media_inline(inline_message_id, InputMedia::Audio(input_media_audio))
@@ -143,6 +165,11 @@ pub async fn handle_chosen_inline_result(
     } else {
         log::info!("Edited message media inline successfully");
     };
+
+    // Clean up thumbnail
+    if let Some(path) = thumbnail_path {
+        let _ = tokio::fs::remove_file(path).await;
+    }
 
     if let Err(e) = bot
         .edit_message_reply_markup_inline(inline_message_id)
@@ -170,6 +197,8 @@ pub async fn handle_chosen_inline_result(
     if let Err(e) = bot.delete_message(tmp_msg.chat.id, tmp_msg.id).await {
         log::error!("Failed to delete temp message: {:?}", e);
     }
+
+    cache_check().unwrap_or_else(|err| log::error!("Unable to check and clear cache: {:?}", err));
 
     Ok(())
 }

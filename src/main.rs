@@ -5,9 +5,11 @@ use teloxide::{Bot, prelude::RequesterExt, types::ParseMode};
 use crate::{db::DatabaseHelper, downloader::Downloader};
 
 mod bot;
+mod cache;
 mod consts;
 mod db;
 mod downloader;
+mod parser;
 
 #[tokio::main]
 async fn main() {

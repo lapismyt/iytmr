@@ -74,3 +74,27 @@ pub const BLANK_PLACEHOLDER: LazyLock<String> = LazyLock::new(|| {
 
     "[[ BLANK ]]".to_string()
 });
+
+pub const MIN_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
+    if let Ok(min_cache_size) = std::env::var("MIN_CACHE_SIZE_MB")
+        && let Ok(min_cache_size) = min_cache_size.parse::<u64>()
+    {
+        log::info!("MIN_CACHE_SIZE_MB set to {}", min_cache_size);
+        return min_cache_size;
+    }
+
+    log::warn!("MIN_CACHE_SIZE_MB is not a valid number, defaulting to 512");
+    512
+});
+
+pub const MAX_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
+    if let Ok(max_cache_size) = std::env::var("MAX_CACHE_SIZE_MB")
+        && let Ok(max_cache_size) = max_cache_size.parse::<u64>()
+    {
+        log::info!("MAX_CACHE_SIZE_MB set to {}", max_cache_size);
+        return max_cache_size;
+    }
+
+    log::warn!("MAX_CACHE_SIZE_MB is not a valid number, defaulting to 1024");
+    1024
+});
