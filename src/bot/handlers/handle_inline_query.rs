@@ -2,6 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use chrono::Utc;
 use teloxide::{
+    payloads::AnswerInlineQuerySetters,
     prelude::Requester,
     types::{
         InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InlineQuery,
@@ -13,7 +14,10 @@ use yt_dlp::model::playlist::PlaylistEntry;
 
 use crate::{
     bot::types::BotWrapped,
-    consts::{BLANK_PLACEHOLDER, MAX_DURATION, MAX_RESULTS, MIN_DURATION, NO_RESULTS_ID, VERSION},
+    consts::{
+        BLANK_PLACEHOLDER, INLINE_CACHE_TIME, MAX_DURATION, MAX_RESULTS, MIN_DURATION,
+        NO_RESULTS_ID, VERSION,
+    },
     downloader::Downloader,
 };
 
@@ -119,7 +123,11 @@ pub async fn handle_inline_query(
         }));
     }
 
-    if let Err(e) = bot.answer_inline_query(inline_query.id, results).await {
+    if let Err(e) = bot
+        .answer_inline_query(inline_query.id, results)
+        .cache_time(*INLINE_CACHE_TIME)
+        .await
+    {
         log::error!("Failed to answer inline query: {}", e);
     };
 

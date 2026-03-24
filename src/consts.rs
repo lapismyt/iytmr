@@ -98,3 +98,15 @@ pub const MAX_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
     log::warn!("MAX_CACHE_SIZE_MB is not a valid number, defaulting to 1024");
     1024
 });
+
+pub const INLINE_CACHE_TIME: LazyLock<u32> = LazyLock::new(|| {
+    if let Ok(cache_time) = std::env::var("INLINE_CACHE_TIME")
+        && let Ok(cache_time) = cache_time.parse::<u32>()
+    {
+        log::info!("INLINE_CACHE_TIME set to {}", cache_time);
+        return cache_time;
+    }
+
+    log::warn!("INLINE_CACHE_TIME is not a valid number, defaulting to 300");
+    300
+});
