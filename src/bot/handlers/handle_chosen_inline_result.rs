@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use chrono::{TimeDelta, Utc};
 use teloxide::{
     payloads::{EditMessageReplyMarkupInlineSetters, SendAudioSetters},
     prelude::Requester,
     types::{
-        ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardButtonKind,
+        ChatId, ChosenInlineResult, FileId, InlineKeyboardButton, InlineKeyboardButtonKind,
         InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio, Me,
     },
 };
@@ -13,7 +14,7 @@ use crate::{
     bot::types::{BotWrapped, DataStore},
     cache::cache_check,
     consts::{MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID},
-    db::DatabaseHelper,
+    db::{DatabaseHelper, models::SavedVideo},
     downloader::Downloader,
     parser::get_title_and_perfomer,
 };
@@ -26,6 +27,74 @@ fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> 
     }
 
     Ok(parts[0].to_string())
+}
+
+pub async fn download_video(
+    bot: &BotWrapped,
+    downloader: Arc<Downloader>,
+    db: Arc<DatabaseHelper>,
+    video_id: &str,
+) -> anyhow::Result<SavedVideo> {
+    if let Some(saved_video) = db.get_saved_video(video_id) {
+        log::info!("Found saved video for {}", video_id);
+        return Ok(saved_video);
+    }
+
+    log::info!("Downloading {}...", video_id);
+
+    let Ok((video, download_path, thumbnail_path)) = downloader.download(video_id).await else {
+        return Err(anyhow::anyhow!("Failed to download {}", video_id));
+    };
+
+    let (title, performer) = get_title_and_perfomer(&video.title, video.uploader.as_deref());
+
+    log::info!("Downloaded {}, getting file id", video_id);
+
+    let mut send_audio = bot
+        .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
+        .title(&title)
+        .performer(&performer);
+
+    if let Some(path) = &thumbnail_path {
+        send_audio = send_audio.thumbnail(InputFile::file(path));
+    }
+
+    let tmp_msg = match send_audio.await {
+        Ok(msg) => msg,
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to get file id for audio: {}", e));
+        }
+    };
+
+    let audio = match tmp_msg.audio() {
+        Some(audio) => audio,
+        None => {
+            return Err(anyhow::anyhow!("Failed to get audio from message"));
+        }
+    };
+
+    log::info!("Got file id for audio: {}", &audio.file.id);
+
+    if let Err(e) = bot.delete_message(tmp_msg.chat.id, tmp_msg.id).await {
+        log::error!("Failed to delete temp message: {:?}", e);
+    }
+
+    let result_video = SavedVideo {
+        file_id: audio.file.id.0.clone(),
+        title,
+        performer,
+        duration: audio.duration.seconds(),
+        thumbnail: thumbnail_path.unwrap_or_default(),
+        expires_at: Utc::now() + TimeDelta::days(7),
+        path: download_path,
+        video_id: video_id.to_string(),
+    };
+
+    if let Err(e) = db.save_video(&result_video) {
+        log::error!("Failed to save video: {:?}", e);
+    }
+
+    Ok(result_video)
 }
 
 pub async fn handle_chosen_inline_result(
@@ -43,32 +112,6 @@ pub async fn handle_chosen_inline_result(
 
     let user_id = chosen_inline_result.from.id.0;
 
-    {
-        let count = data_store
-            .active_downloads
-            .get(&user_id)
-            .map(|v| *v)
-            .unwrap_or(0);
-        if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
-            bot.edit_message_text_inline(
-                inline_message_id,
-                format!(
-                    "Error: You already have {} active downloads. Please wait.",
-                    *MAX_USER_PARALLEL_DOWNLOADS
-                ),
-            )
-            .await
-            .ok();
-            return Ok(());
-        }
-    }
-
-    data_store
-        .active_downloads
-        .entry(user_id)
-        .and_modify(|v| *v += 1)
-        .or_insert(1);
-
     let Ok(video_id) = decode_temporary_id(&chosen_inline_result.result_id) else {
         log::error!(
             "Failed to decode result id: {}",
@@ -78,84 +121,68 @@ pub async fn handle_chosen_inline_result(
             .await
             .ok();
 
-        data_store
-            .active_downloads
-            .entry(user_id)
-            .and_modify(|v| *v -= 1);
         return Ok(());
     };
 
-    log::info!("Downloading {}...", video_id);
-
-    let Ok((video, download_path, thumbnail_path)) = downloader.download(&video_id).await else {
-        log::error!("Failed to download {}", video_id);
-        bot.edit_message_text_inline(inline_message_id, "Error: Failed to download audio")
-            .await
-            .ok();
-        data_store
-            .active_downloads
-            .entry(user_id)
-            .and_modify(|v| *v -= 1);
-        return Ok(());
-    };
-
-    let (title, performer) = get_title_and_perfomer(&video.title, video.uploader.as_deref());
-
-    log::info!("Downloaded {}, getting file id", video_id);
-
-    let mut send_audio = bot
-        .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
-        .title(title)
-        .performer(performer);
-
-    if let Some(path) = &thumbnail_path {
-        send_audio = send_audio.thumbnail(InputFile::file(path));
-    }
-
-    let tmp_msg = match send_audio.await {
-        Ok(msg) => msg,
-        Err(e) => {
-            log::error!("Failed to get file id for audio: {}", e);
-            data_store
-                .active_downloads
-                .entry(user_id)
-                .and_modify(|v| *v -= 1);
-            return Ok(());
-        }
-    };
-
-    let audio = match tmp_msg.audio() {
-        Some(audio) => audio,
+    let video = match db.get_saved_video(&video_id) {
+        Some(file_id) => file_id,
         None => {
-            log::error!("Failed to get audio from message");
+            {
+                let count = data_store
+                    .active_downloads
+                    .get(&user_id)
+                    .map(|v| *v)
+                    .unwrap_or(0);
+                if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
+                    bot.edit_message_text_inline(
+                        inline_message_id,
+                        format!(
+                            "Error: You already have {} active downloads. Please wait.",
+                            *MAX_USER_PARALLEL_DOWNLOADS
+                        ),
+                    )
+                    .await
+                    .ok();
+                    return Ok(());
+                }
+            }
+
+            data_store
+                .active_downloads
+                .entry(user_id)
+                .and_modify(|v| *v += 1)
+                .or_insert(1);
+
+            let id = download_video(&bot, downloader, db.clone(), &video_id).await;
+
             data_store
                 .active_downloads
                 .entry(user_id)
                 .and_modify(|v| *v -= 1);
-            return Ok(());
+
+            match id {
+                Ok(video) => video,
+                Err(e) => {
+                    bot.edit_message_text_inline(
+                        inline_message_id,
+                        format!("Error: Failed to download video: {:?}", e),
+                    )
+                    .await
+                    .ok();
+                    return Err(e);
+                }
+            }
         }
     };
 
-    log::info!("Got file id for audio: {}", &audio.file.id);
+    let mut input_media_audio =
+        InputMediaAudio::new(InputFile::file_id(FileId::from(video.file_id)))
+            .caption(format!("Downloaded with @{}", me.username()))
+            .title(video.title)
+            .performer(video.performer)
+            .duration(video.duration as u16);
 
-    data_store
-        .active_downloads
-        .entry(user_id)
-        .and_modify(|v| *v -= 1);
-
-    let mut input_media_audio = InputMediaAudio::new(InputFile::file_id(audio.file.id.clone()))
-        .caption(format!("Downloaded with @{}", me.username()))
-        .title(video.title)
-        .performer(video.uploader.unwrap_or("???".to_string()))
-        .duration(video.duration.unwrap_or(1) as u16);
-
-    if let Some(path) = &thumbnail_path {
-        input_media_audio = input_media_audio.thumbnail(InputFile::file(path));
-    } else {
-        input_media_audio = input_media_audio.thumbnail(InputFile::url(url::Url::parse(
-            format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", video_id).as_str(),
-        )?));
-    }
+    input_media_audio = input_media_audio.thumbnail(InputFile::file(video.thumbnail));
 
     if let Err(e) = bot
         .edit_message_media_inline(inline_message_id, InputMedia::Audio(input_media_audio))
@@ -166,20 +193,12 @@ pub async fn handle_chosen_inline_result(
         log::info!("Edited message media inline successfully");
     };
 
-    // Clean up thumbnail
-    if let Some(path) = thumbnail_path {
-        let _ = tokio::fs::remove_file(path).await;
-    }
-
     if let Err(e) = bot
         .edit_message_reply_markup_inline(inline_message_id)
         .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
             "YouTube",
             InlineKeyboardButtonKind::Url(reqwest::Url::parse(
-                video
-                    .webpage_url
-                    .unwrap_or(format!("https://www.youtube.com/watch?v={}", video_id))
-                    .as_str(),
+                format!("https://www.youtube.com/watch?v={}", video_id).as_str(),
             )?),
         )]]))
         .await
@@ -193,10 +212,6 @@ pub async fn handle_chosen_inline_result(
     db.increment_video_dl_counter(&video_id)?;
 
     log::info!("Incremented user and video download counters");
-
-    if let Err(e) = bot.delete_message(tmp_msg.chat.id, tmp_msg.id).await {
-        log::error!("Failed to delete temp message: {:?}", e);
-    }
 
     cache_check().unwrap_or_else(|err| log::error!("Unable to check and clear cache: {:?}", err));
 

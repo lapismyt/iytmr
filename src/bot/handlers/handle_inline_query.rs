@@ -19,6 +19,7 @@ use crate::{
         NO_RESULTS_ID, VERSION,
     },
     downloader::Downloader,
+    parser::get_title_and_perfomer,
 };
 
 fn get_temporary_id(hashable: &str) -> String {
@@ -30,24 +31,26 @@ fn get_temporary_id(hashable: &str) -> String {
     )
 }
 
+fn is_totally_invisible(s: &str) -> bool {
+    s.chars()
+        .all(|c| c.is_whitespace() || c.is_control() || (c >= '\u{200B}' && c <= '\u{200D}'))
+}
+
 fn playlist_entry_to_inline_query_result_article(
     bot: &BotWrapped,
     vid: &PlaylistEntry,
 ) -> InlineQueryResultArticle {
     let thumbnail_url = format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", vid.id);
+    let (title, performer) = get_title_and_perfomer(&vid.title, vid.uploader.as_deref());
 
     let mut article = InlineQueryResultArticle::new(
         get_temporary_id(&vid.id),
-        match vid.title.is_empty() {
+        match is_totally_invisible(&title) {
             true => BLANK_PLACEHOLDER.to_string(),
-            false => vid.title.clone(),
+            false => title.clone(),
         },
         InputMessageContent::Text(InputMessageContentText {
-            message_text: format!(
-                "<b>Downloading \"{} — {}\"...</b>",
-                vid.title,
-                vid.uploader.clone().unwrap_or("None".to_string())
-            ),
+            message_text: format!("<b>Downloading \"{} — {}\"...</b>", title, performer),
             parse_mode: Some(bot.parse_mode()),
             entities: None,
             link_preview_options: Some(LinkPreviewOptions {
@@ -62,11 +65,8 @@ fn playlist_entry_to_inline_query_result_article(
     .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
         "Loading...",
         InlineKeyboardButtonKind::CallbackData("loading".to_string()),
-    )]]));
-
-    if let Some(uploader) = &vid.uploader {
-        article = article.description(uploader);
-    }
+    )]]))
+    .description(performer);
 
     if let Ok(thumbnail_url) = reqwest::Url::from_str(&thumbnail_url) {
         article = article.thumbnail_url(thumbnail_url);

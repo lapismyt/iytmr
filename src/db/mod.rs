@@ -2,12 +2,14 @@ use chrono::{DateTime, TimeDelta, Utc};
 use redb::{ReadableDatabase, ReadableTable as _, ReadableTableMetadata as _, TableDefinition};
 use rmp_serde::{decode, encode};
 
-use crate::db::models::UserInfo;
+use crate::db::models::{SavedVideo, UserInfo};
 
 pub mod models;
 
 const TG_ID_TO_USER_INFO: TableDefinition<u64, &[u8]> = TableDefinition::new("tg_id_to_user_info");
 const YT_ID_TO_DL_COUNT: TableDefinition<&str, u32> = TableDefinition::new("yt_id_to_dl_count");
+const VIDEO_ID_TO_SAVED_VIDEO: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("video_id_to_tg_file_id");
 
 pub struct DatabaseHelper {
     db: redb::Database,
@@ -205,5 +207,32 @@ impl DatabaseHelper {
         write_txn.commit()?;
 
         Ok(())
+    }
+
+    pub fn save_video(&self, saved_video: &SavedVideo) -> anyhow::Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
+            table.insert(
+                saved_video.video_id.as_str(),
+                encode::to_vec(saved_video)?.as_slice(),
+            )?;
+        }
+        write_txn.commit()?;
+
+        Ok(())
+    }
+
+    pub fn get_saved_video<V: Into<String>>(&self, video_id: V) -> Option<SavedVideo> {
+        let video_id = video_id.into();
+        let read_txn = self.db.begin_read().ok()?;
+        let table = read_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO).ok()?;
+        let value: SavedVideo =
+            decode::from_slice(table.get(video_id.as_str()).ok().flatten()?.value()).ok()?;
+
+        match value.is_expired() {
+            true => None,
+            false => Some(value),
+        }
     }
 }
