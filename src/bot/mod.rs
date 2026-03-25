@@ -1,7 +1,7 @@
 mod handlers;
 pub mod types;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use teloxide::{
     dispatching::{HandlerExt as _, UpdateFilterExt},
@@ -11,7 +11,7 @@ use teloxide::{
     types::Update,
 };
 
-use crate::bot::types::{BotWrapped, DataStore};
+use crate::{bot::types::BotWrapped, cache::DataStore};
 use crate::{db::DatabaseHelper, downloader::Downloader};
 
 #[derive(BotCommands, Clone, Debug)]
@@ -26,7 +26,7 @@ pub async fn run(
     bot: BotWrapped,
     downloader: Arc<Downloader>,
     db: Arc<DatabaseHelper>,
-    counters: Arc<DataStore>,
+    counters: Arc<Mutex<DataStore>>,
 ) {
     let db_for_inspect = db.clone();
 

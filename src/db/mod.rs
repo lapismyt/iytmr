@@ -9,7 +9,7 @@ pub mod models;
 const TG_ID_TO_USER_INFO: TableDefinition<u64, &[u8]> = TableDefinition::new("tg_id_to_user_info");
 const YT_ID_TO_DL_COUNT: TableDefinition<&str, u32> = TableDefinition::new("yt_id_to_dl_count");
 const VIDEO_ID_TO_SAVED_VIDEO: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("video_id_to_tg_file_id");
+    TableDefinition::new("video_id_to_saved_video");
 
 pub struct DatabaseHelper {
     db: redb::Database,
@@ -234,5 +234,11 @@ impl DatabaseHelper {
             true => None,
             false => Some(value),
         }
+    }
+
+    pub fn get_cached_files_count(&self) -> anyhow::Result<u64> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
+        Ok(table.len()?)
     }
 }

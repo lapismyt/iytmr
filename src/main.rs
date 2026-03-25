@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use teloxide::{Bot, prelude::RequesterExt, types::ParseMode};
 
-use crate::{db::DatabaseHelper, downloader::Downloader};
+use crate::{cache::DataStore, db::DatabaseHelper, downloader::Downloader};
 
 mod bot;
 mod cache;
@@ -31,7 +31,7 @@ async fn main() {
         Bot::from_env().parse_mode(ParseMode::Html),
         downloader.clone(),
         db.clone(),
-        Arc::new(crate::bot::types::DataStore::default()),
+        Arc::new(Mutex::new(DataStore::new(db.clone()))),
     )
     .await;
 }

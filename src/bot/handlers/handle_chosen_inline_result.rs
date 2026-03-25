@@ -1,4 +1,7 @@
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 
 use chrono::{TimeDelta, Utc};
 use teloxide::{
@@ -11,8 +14,8 @@ use teloxide::{
 };
 
 use crate::{
-    bot::types::{BotWrapped, DataStore},
-    cache::cache_check,
+    bot::types::BotWrapped,
+    cache::{DataStore, cache_check},
     consts::{MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID},
     db::{DatabaseHelper, models::SavedVideo},
     downloader::Downloader,
@@ -34,6 +37,7 @@ pub async fn download_video(
     downloader: Arc<Downloader>,
     db: Arc<DatabaseHelper>,
     video_id: &str,
+    data_store: Arc<Mutex<DataStore>>,
 ) -> anyhow::Result<SavedVideo> {
     if let Some(saved_video) = db.get_saved_video(video_id) {
         log::info!("Found saved video for {}", video_id);
@@ -94,6 +98,13 @@ pub async fn download_video(
         log::error!("Failed to save video: {:?}", e);
     }
 
+    data_store.lock().unwrap().cached_files_count.increment();
+    data_store
+        .lock()
+        .unwrap()
+        .downloaded_files_count
+        .increment();
+
     Ok(result_video)
 }
 
@@ -102,7 +113,7 @@ pub async fn handle_chosen_inline_result(
     chosen_inline_result: ChosenInlineResult,
     downloader: Arc<Downloader>,
     db: Arc<DatabaseHelper>,
-    data_store: Arc<DataStore>,
+    data_store: Arc<Mutex<DataStore>>,
     me: Me,
 ) -> anyhow::Result<()> {
     let Some(inline_message_id) = chosen_inline_result.inline_message_id.as_deref() else {
@@ -129,6 +140,8 @@ pub async fn handle_chosen_inline_result(
         None => {
             {
                 let count = data_store
+                    .lock()
+                    .unwrap()
                     .active_downloads
                     .get(&user_id)
                     .map(|v| *v)
@@ -148,14 +161,19 @@ pub async fn handle_chosen_inline_result(
             }
 
             data_store
+                .lock()
+                .unwrap()
                 .active_downloads
                 .entry(user_id)
                 .and_modify(|v| *v += 1)
                 .or_insert(1);
 
-            let id = download_video(&bot, downloader, db.clone(), &video_id).await;
+            let id =
+                download_video(&bot, downloader, db.clone(), &video_id, data_store.clone()).await;
 
             data_store
+                .lock()
+                .unwrap()
                 .active_downloads
                 .entry(user_id)
                 .and_modify(|v| *v -= 1);

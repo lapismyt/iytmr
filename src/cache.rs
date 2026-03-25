@@ -1,8 +1,125 @@
 use std::{fs, path::PathBuf};
 
+use dashmap::DashMap;
 use walkdir::WalkDir;
 
-use crate::consts::{MAX_CACHE_SIZE_MB, MIN_CACHE_SIZE_MB, OUTPUT_DIR};
+use crate::{
+    consts::{MAX_CACHE_SIZE_MB, MIN_CACHE_SIZE_MB, OUTPUT_DIR},
+    db::DatabaseHelper,
+};
+
+#[derive(Debug)]
+pub struct CounterCached {
+    count: u64,
+    updated_at: std::time::Instant,
+}
+
+impl CounterCached {
+    pub fn increment(&mut self) {
+        self.count += 1;
+        self.updated_at = std::time::Instant::now();
+    }
+}
+
+#[derive(Debug)]
+pub struct DataStore {
+    pub active_downloads: DashMap<u64, i32>,
+    pub downloaded_files_count: CounterCached,
+    pub cached_files_count: CounterCached,
+    pub total_users_count: CounterCached,
+    pub monthly_users_count: CounterCached,
+}
+
+impl DataStore {
+    pub fn get_downloaded_files_count(&mut self) -> u64 {
+        if std::time::Instant::now().duration_since(self.downloaded_files_count.updated_at)
+            > std::time::Duration::from_secs(180)
+        {
+            self.downloaded_files_count.count = get_downloaded_files_count()
+                .unwrap_or(self.downloaded_files_count.count as usize)
+                as u64;
+        }
+
+        self.downloaded_files_count.count
+    }
+
+    fn get_downloaded_files_count_raw() -> u64 {
+        get_downloaded_files_count().unwrap_or(0) as u64
+    }
+
+    pub fn get_cached_files_count<D: AsRef<DatabaseHelper>>(&mut self, db: D) -> u64 {
+        if std::time::Instant::now().duration_since(self.cached_files_count.updated_at)
+            > std::time::Duration::from_secs(180)
+        {
+            self.cached_files_count.count = db
+                .as_ref()
+                .get_cached_files_count()
+                .unwrap_or(self.cached_files_count.count);
+        }
+
+        self.cached_files_count.count
+    }
+
+    fn get_cached_files_count_raw<D: AsRef<DatabaseHelper>>(db: D) -> u64 {
+        db.as_ref().get_cached_files_count().unwrap_or(0)
+    }
+
+    pub fn get_total_users_count<D: AsRef<DatabaseHelper>>(&mut self, db: D) -> u64 {
+        if std::time::Instant::now().duration_since(self.total_users_count.updated_at)
+            > std::time::Duration::from_secs(180)
+        {
+            self.total_users_count.count = db
+                .as_ref()
+                .get_total_users_count()
+                .unwrap_or(self.total_users_count.count);
+        }
+
+        self.total_users_count.count
+    }
+
+    fn get_total_users_count_raw<D: AsRef<DatabaseHelper>>(db: D) -> u64 {
+        db.as_ref().get_total_users_count().unwrap_or(0)
+    }
+
+    pub fn get_cached_monthly_users_count<D: AsRef<DatabaseHelper>>(&mut self, db: D) -> u64 {
+        if std::time::Instant::now().duration_since(self.monthly_users_count.updated_at)
+            > std::time::Duration::from_secs(180)
+        {
+            self.monthly_users_count.count =
+                db.as_ref()
+                    .get_monthly_active_users_count()
+                    .unwrap_or(self.monthly_users_count.count as usize) as u64;
+        }
+
+        self.monthly_users_count.count
+    }
+
+    fn get_cached_monthly_users_count_raw<D: AsRef<DatabaseHelper>>(db: D) -> u64 {
+        db.as_ref().get_monthly_active_users_count().unwrap_or(0) as u64
+    }
+
+    pub fn new<D: AsRef<DatabaseHelper>>(db: D) -> Self {
+        Self {
+            downloaded_files_count: CounterCached {
+                count: DataStore::get_downloaded_files_count_raw(),
+                updated_at: std::time::Instant::now(),
+            },
+            cached_files_count: CounterCached {
+                count: DataStore::get_cached_files_count_raw(&db),
+                updated_at: std::time::Instant::now(),
+            },
+            active_downloads: DashMap::new(),
+            total_users_count: CounterCached {
+                count: DataStore::get_total_users_count_raw(&db),
+                updated_at: std::time::Instant::now(),
+            },
+            monthly_users_count: CounterCached {
+                count: DataStore::get_cached_monthly_users_count_raw(&db),
+                updated_at: std::time::Instant::now(),
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct OutputFolderInfo {
@@ -76,4 +193,9 @@ pub fn cache_check() -> anyhow::Result<()> {
         (folder_info.total_size - result_size) / 1024 / 1024
     );
     Ok(())
+}
+
+pub fn get_downloaded_files_count() -> anyhow::Result<usize> {
+    let folder_info = get_output_folder_info()?;
+    Ok(folder_info.files.len())
 }

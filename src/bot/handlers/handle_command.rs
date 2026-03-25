@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use teloxide::{
@@ -8,6 +8,7 @@ use teloxide::{
 
 use crate::{
     bot::{Command, types::BotWrapped},
+    cache::DataStore,
     db::DatabaseHelper,
 };
 
@@ -16,6 +17,7 @@ async fn handle_stats(
     chat_id: ChatId,
     user_id: UserId,
     db: Arc<DatabaseHelper>,
+    data_store: Arc<Mutex<DataStore>>,
 ) -> anyhow::Result<()> {
     let mut register_date_str = "???".to_string();
 
@@ -25,12 +27,23 @@ async fn handle_stats(
 
     let dl_count = db.get_user_dl_count(&user_id.0);
     let total_dl_count = db.get_total_dl_count().unwrap_or(0);
-    let total_users = db.get_total_users_count().unwrap_or(0);
-    let monthly_active_users = db.get_monthly_active_users_count().unwrap_or(0);
+    let total_users = data_store.lock().unwrap().get_total_users_count(&db);
+    let monthly_active_users = data_store
+        .lock()
+        .unwrap()
+        .get_cached_monthly_users_count(&db);
+    let cached_files_count = data_store.lock().unwrap().get_cached_files_count(&db);
+    let downloaded_files_count = data_store.lock().unwrap().get_downloaded_files_count();
 
     let message = format!(
         include_str!("../resources/stats.html"),
-        total_users, monthly_active_users, total_dl_count, dl_count, register_date_str,
+        total_users,
+        monthly_active_users,
+        downloaded_files_count,
+        cached_files_count,
+        total_dl_count,
+        dl_count,
+        register_date_str,
     );
 
     bot.send_message(chat_id, message).await?;
@@ -43,6 +56,7 @@ pub async fn handle_command(
     message: Message,
     command: Command,
     db: Arc<DatabaseHelper>,
+    data_store: Arc<Mutex<DataStore>>,
 ) -> anyhow::Result<()> {
     let start_time = std::time::Instant::now();
 
@@ -66,7 +80,7 @@ pub async fn handle_command(
                 log::warn!("Failed to send help message: {:?}", e);
             }
         }
-        Command::Stats => handle_stats(bot, chat.id, user.id, db).await?,
+        Command::Stats => handle_stats(bot, chat.id, user.id, db, data_store).await?,
     };
 
     let elapsed = start_time.elapsed();
