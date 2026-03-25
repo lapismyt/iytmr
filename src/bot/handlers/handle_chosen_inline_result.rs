@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use chrono::{TimeDelta, Utc};
 use teloxide::{
@@ -182,7 +182,11 @@ pub async fn handle_chosen_inline_result(
             .performer(video.performer)
             .duration(video.duration as u16);
 
-    input_media_audio = input_media_audio.thumbnail(InputFile::file(video.thumbnail));
+    if let Ok(exists) = fs::exists(&video.thumbnail) {
+        if exists {
+            input_media_audio = input_media_audio.thumbnail(InputFile::file(video.thumbnail));
+        }
+    }
 
     if let Err(e) = bot
         .edit_message_media_inline(inline_message_id, InputMedia::Audio(input_media_audio))
