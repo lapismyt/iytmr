@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
 use yt_dlp::{
     extractor::VideoExtractor, model::playlist::Playlist, model::selector::ThumbnailQuality,
     prelude::*,
@@ -44,6 +45,12 @@ impl Downloader {
         })
     }
 
+    fn sha256_hash(video_id: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(video_id);
+        format!("{:x}", hasher.finalize())
+    }
+
     pub async fn download<U: Into<String>>(
         &self,
         url: U,
@@ -55,7 +62,9 @@ impl Downloader {
             .await?;
 
         let video_id = video.id.clone();
-        let audio_filename = format!("{}.mp3", video_id);
+        let video_id_hash = Downloader::sha256_hash(&video_id);
+
+        let audio_filename = format!("{}.mp3", video_id_hash);
 
         let audio_path = self
             .client
@@ -68,7 +77,7 @@ impl Downloader {
             .await?;
 
         // Handle thumbnail
-        let thumbnail_filename = format!("{}.jpg", video_id);
+        let thumbnail_filename = format!("{}.jpg", video_id_hash);
         let thumbnail_path = match self
             .client
             .download_thumbnail(

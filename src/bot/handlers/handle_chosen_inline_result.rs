@@ -46,8 +46,14 @@ pub async fn download_video(
 
     log::info!("Downloading {}...", video_id);
 
-    let Ok((video, download_path, thumbnail_path)) = downloader.download(video_id).await else {
-        return Err(anyhow::anyhow!("Failed to download {}", video_id));
+    let (video, download_path, thumbnail_path) = match downloader
+        .download(format!("https://www.youtube.com/watch?v={}", video_id))
+        .await
+    {
+        Ok((video, download_path, thumbnail_path)) => (video, download_path, thumbnail_path),
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to download {}: {}", video_id, e));
+        }
     };
 
     let (title, performer) = get_title_and_perfomer(&video.title, video.uploader.as_deref());
@@ -150,7 +156,7 @@ pub async fn handle_chosen_inline_result(
                     bot.edit_message_text_inline(
                         inline_message_id,
                         format!(
-                            "Error: You already have {} active downloads. Please wait.",
+                            "💥 Error: You already have {} active downloads. Please wait.",
                             *MAX_USER_PARALLEL_DOWNLOADS
                         ),
                     )
@@ -183,7 +189,7 @@ pub async fn handle_chosen_inline_result(
                 Err(e) => {
                     bot.edit_message_text_inline(
                         inline_message_id,
-                        format!("Error: Failed to download video: {:?}", e),
+                        format!("💥 Error: Failed to download video: {:?}", e),
                     )
                     .await
                     .ok();
@@ -195,7 +201,7 @@ pub async fn handle_chosen_inline_result(
 
     let mut input_media_audio =
         InputMediaAudio::new(InputFile::file_id(FileId::from(video.file_id)))
-            .caption(format!("Downloaded with @{}", me.username()))
+            .caption(format!("✨ Downloaded with @{}", me.username()))
             .title(video.title)
             .performer(video.performer)
             .duration(video.duration as u16);
