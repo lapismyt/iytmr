@@ -50,7 +50,7 @@ fn playlist_entry_to_inline_query_result_article(
             false => title.clone(),
         },
         InputMessageContent::Text(InputMessageContentText {
-            message_text: format!("<b>Downloading \"{} — {}\"...</b>", title, performer),
+            message_text: format!("<b>Downloading \"{} — {}\"...</b>", performer, title),
             parse_mode: Some(bot.parse_mode()),
             entities: None,
             link_preview_options: Some(LinkPreviewOptions {
