@@ -41,7 +41,16 @@ pub async fn download_video(
 ) -> anyhow::Result<SavedVideo> {
     if let Some(saved_video) = db.get_saved_video(video_id) {
         log::info!("Found saved video for {}", video_id);
-        return Ok(saved_video);
+        if fs::exists(&saved_video.path).unwrap_or(false) {
+            log::info!("Saved video for {} exists, returning", video_id);
+            return Ok(saved_video);
+        } else {
+            log::info!(
+                "Saved video for {} does not exist, deleting from db",
+                video_id
+            );
+            db.delete_saved_video(video_id).ok();
+        }
     }
 
     log::info!("Downloading {}...", video_id);

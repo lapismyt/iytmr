@@ -241,4 +241,16 @@ impl DatabaseHelper {
         let table = read_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
         Ok(table.len()?)
     }
+
+    pub fn delete_saved_video<V: Into<String>>(&self, video_id: V) -> anyhow::Result<()> {
+        let video_id = video_id.into();
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
+            table.remove(video_id.as_str())?;
+        }
+        write_txn.commit()?;
+
+        Ok(())
+    }
 }
