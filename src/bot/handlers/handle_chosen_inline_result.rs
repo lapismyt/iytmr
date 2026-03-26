@@ -49,7 +49,9 @@ pub async fn download_video(
                 "Saved video for {} does not exist, deleting from db",
                 video_id
             );
-            db.delete_saved_video(video_id).ok();
+            if let Err(e) = db.delete_saved_video(video_id) {
+                log::warn!("Failed to delete saved video for {}: {}", video_id, e);
+            }
         }
     }
 
