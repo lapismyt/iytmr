@@ -4,19 +4,22 @@ use std::{
 };
 
 use chrono::{TimeDelta, Utc};
+use rand::RngExt;
 use teloxide::{
     payloads::{EditMessageReplyMarkupInlineSetters, SendAudioSetters},
     prelude::Requester,
     types::{
         ChatId, ChosenInlineResult, FileId, InlineKeyboardButton, InlineKeyboardButtonKind,
-        InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio, Me,
+        InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio,
     },
 };
 
 use crate::{
     bot::types::BotWrapped,
     cache::{DataStore, cache_check},
-    consts::{MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID},
+    consts::{
+        ADVERTISE_CHANCE, ADVERTISE_NAME, ADVERTISE_URL, MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID,
+    },
     db::{DatabaseHelper, models::SavedVideo},
     downloader::Downloader,
     parser::get_title_and_perfomer,
@@ -30,6 +33,40 @@ fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> 
     }
 
     Ok(parts[0].to_string())
+}
+
+fn get_keyboard(video_id: &str) -> anyhow::Result<InlineKeyboardMarkup> {
+    let youtube_button = InlineKeyboardButton::new(
+        "YouTube",
+        InlineKeyboardButtonKind::Url(reqwest::Url::parse(
+            format!("https://www.youtube.com/watch?v={}", video_id).as_str(),
+        )?),
+    );
+
+    let num: u8 = {
+        let mut rng = rand::rng();
+        rng.random_range(0..100)
+    };
+
+    let Some(adv_name) = &*ADVERTISE_NAME else {
+        return Ok(InlineKeyboardMarkup::new([[youtube_button]]));
+    };
+
+    let Some(adv_url) = &*ADVERTISE_URL else {
+        return Ok(InlineKeyboardMarkup::new([[youtube_button]]));
+    };
+
+    if num > *ADVERTISE_CHANCE {
+        return Ok(InlineKeyboardMarkup::new([[youtube_button]]));
+    }
+
+    Ok(InlineKeyboardMarkup::new([
+        [youtube_button],
+        [InlineKeyboardButton::new(
+            adv_name,
+            InlineKeyboardButtonKind::Url(reqwest::Url::parse(adv_url.as_str())?),
+        )],
+    ]))
 }
 
 pub async fn download_video(
@@ -131,9 +168,8 @@ pub async fn handle_chosen_inline_result(
     downloader: Arc<Downloader>,
     db: Arc<DatabaseHelper>,
     data_store: Arc<Mutex<DataStore>>,
-    me: Me,
 ) -> anyhow::Result<()> {
-    let Some(inline_message_id) = chosen_inline_result.inline_message_id.as_deref() else {
+    let Some(inline_message_id) = chosen_inline_result.inline_message_id.clone() else {
         log::error!("No inline message id for chosen inline result");
         return Ok(());
     };
@@ -145,7 +181,7 @@ pub async fn handle_chosen_inline_result(
             "Failed to decode result id: {}",
             chosen_inline_result.result_id
         );
-        bot.edit_message_text_inline(inline_message_id, "Error: Failed to decode result id")
+        bot.edit_message_text_inline(&inline_message_id, "Error: Failed to decode result id")
             .await
             .ok();
 
@@ -165,7 +201,7 @@ pub async fn handle_chosen_inline_result(
                     .unwrap_or(0);
                 if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
                     bot.edit_message_text_inline(
-                        inline_message_id,
+                        &inline_message_id,
                         format!(
                             "💥 Error: You already have {} active downloads. Please wait.",
                             *MAX_USER_PARALLEL_DOWNLOADS
@@ -199,7 +235,7 @@ pub async fn handle_chosen_inline_result(
                 Ok(video) => video,
                 Err(e) => {
                     bot.edit_message_text_inline(
-                        inline_message_id,
+                        &inline_message_id,
                         format!("💥 Error: Failed to download video: {:?}", e),
                     )
                     .await
@@ -210,9 +246,18 @@ pub async fn handle_chosen_inline_result(
         }
     };
 
+    let mut text = format!(
+        "<code>{}</code> — <code>{}</code>\n",
+        &video.performer, &video.title
+    );
+
+    if let Ok(me) = bot.get_me().await {
+        text += &format!("✨ Downloaded with @{}", me.username());
+    }
+
     let mut input_media_audio =
         InputMediaAudio::new(InputFile::file_id(FileId::from(video.file_id)))
-            .caption(format!("✨ Downloaded with @{}", me.username()))
+            .caption(text)
             .title(video.title)
             .performer(video.performer)
             .duration(video.duration as u16);
@@ -224,7 +269,7 @@ pub async fn handle_chosen_inline_result(
     }
 
     if let Err(e) = bot
-        .edit_message_media_inline(inline_message_id, InputMedia::Audio(input_media_audio))
+        .edit_message_media_inline(&inline_message_id, InputMedia::Audio(input_media_audio))
         .await
     {
         log::error!("Failed to edit message media inline: {:?}", e);
@@ -233,13 +278,8 @@ pub async fn handle_chosen_inline_result(
     };
 
     if let Err(e) = bot
-        .edit_message_reply_markup_inline(inline_message_id)
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "YouTube",
-            InlineKeyboardButtonKind::Url(reqwest::Url::parse(
-                format!("https://www.youtube.com/watch?v={}", video_id).as_str(),
-            )?),
-        )]]))
+        .edit_message_reply_markup_inline(&inline_message_id)
+        .reply_markup(get_keyboard(&video_id)?)
         .await
     {
         log::error!("Failed to edit message reply markup: {:?}", e);

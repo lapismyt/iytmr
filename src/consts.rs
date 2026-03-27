@@ -110,3 +110,33 @@ pub const INLINE_CACHE_TIME: LazyLock<u32> = LazyLock::new(|| {
     log::warn!("INLINE_CACHE_TIME is not a valid number, defaulting to 300");
     300
 });
+
+pub const ADVERTISE_NAME: LazyLock<Option<String>> = LazyLock::new(|| {
+    if let Ok(announce_message) = std::env::var("ADVERTISE_NAME") {
+        log::info!("ADVERTISE_NAME set to {}", announce_message);
+        return Some(announce_message);
+    }
+
+    None
+});
+
+pub const ADVERTISE_URL: LazyLock<Option<String>> = LazyLock::new(|| {
+    if let Ok(announce_message) = std::env::var("ADVERTISE_URL") {
+        log::info!("ADVERTISE_URL set to {}", announce_message);
+        return Some(announce_message);
+    }
+
+    None
+});
+
+pub const ADVERTISE_CHANCE: LazyLock<u8> = LazyLock::new(|| {
+    if let Ok(announce_chance) = std::env::var("ADVERTISE_CHANCE")
+        && let Ok(announce_chance) = announce_chance.parse::<u8>()
+    {
+        log::info!("ANNOUNCE_CHANCE set to {}", announce_chance);
+        return announce_chance;
+    }
+
+    log::warn!("ANNOUNCE_CHANCE is not a valid number, defaulting to 0");
+    0
+});

@@ -1606,6 +1606,7 @@ dependencies = [
  "futures",
  "log",
  "pretty_env_logger",
+ "rand 0.10.0",
  "redb",
  "regex",
  "reqwest 0.13.2",
