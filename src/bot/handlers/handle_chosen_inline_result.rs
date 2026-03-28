@@ -246,10 +246,7 @@ pub async fn handle_chosen_inline_result(
         }
     };
 
-    let mut text = format!(
-        "<code>{}</code> — <code>{}</code>\n",
-        &video.performer, &video.title
-    );
+    let mut text = format!("<code>{} — {}</code>\n", &video.performer, &video.title);
 
     if let Ok(me) = bot.get_me().await {
         text += &format!("✨ Downloaded with @{}", me.username());
