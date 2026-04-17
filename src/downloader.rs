@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use yt_dlp::{
-    extractor::VideoExtractor, model::playlist::Playlist, model::selector::ThumbnailQuality,
+    error::Error as YtDlpError,
+    extractor::VideoExtractor,
+    model::{format::FormatType, playlist::Playlist, selector::ThumbnailQuality},
     prelude::*,
 };
 
@@ -67,13 +69,7 @@ impl Downloader {
         let audio_filename = format!("{}.mp3", video_id_hash);
 
         let audio_path = self
-            .client
-            .download_audio_stream_with_quality(
-                &video,
-                &audio_filename,
-                self.quality,
-                self.codec.clone(),
-            )
+            .download_audio_with_fallback(&video, &audio_filename)
             .await?;
 
         // Handle thumbnail
@@ -121,6 +117,102 @@ impl Downloader {
         }
 
         Ok((video, audio_path, cropped_thumbnail_path))
+    }
+
+    async fn download_audio_with_fallback(
+        &self,
+        video: &Video,
+        audio_filename: &str,
+    ) -> anyhow::Result<PathBuf> {
+        match self
+            .client
+            .download_audio_stream_with_quality(
+                video,
+                audio_filename,
+                self.quality,
+                self.codec.clone(),
+            )
+            .await
+        {
+            Ok(audio_path) => Ok(audio_path),
+            Err(YtDlpError::FormatNotAvailable { format_type, .. })
+                if format_type == FormatType::Audio =>
+            {
+                log::warn!(
+                    "No standalone audio format for {}, falling back to muxed video download",
+                    video.id
+                );
+                self.download_muxed_video_and_extract_audio(video, audio_filename)
+                    .await
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    async fn download_muxed_video_and_extract_audio(
+        &self,
+        video: &Video,
+        audio_filename: &str,
+    ) -> anyhow::Result<PathBuf> {
+        let combined_format = video.best_audio_video_format()?;
+        let temp_video_path = self.output_dir.join(format!(
+            "{}.fallback.{}",
+            Path::new(audio_filename)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or(&video.id),
+            combined_format.download_info.ext.as_str()
+        ));
+        let audio_path = self.output_dir.join(audio_filename);
+
+        let download_result = self
+            .client
+            .download_format_to_path(combined_format, &temp_video_path)
+            .await;
+
+        if let Err(err) = download_result {
+            return Err(err.into());
+        }
+
+        let extract_result = self.extract_audio_from_video(&temp_video_path, &audio_path).await;
+        let cleanup_result = tokio::fs::remove_file(&temp_video_path).await;
+
+        if let Err(err) = cleanup_result {
+            log::warn!(
+                "Failed to remove temporary fallback video {}: {}",
+                temp_video_path.display(),
+                err
+            );
+        }
+
+        extract_result?;
+        Ok(audio_path)
+    }
+
+    async fn extract_audio_from_video(
+        &self,
+        video_path: &Path,
+        audio_path: &Path,
+    ) -> anyhow::Result<()> {
+        let mut cmd = tokio::process::Command::new(&self.ffmpeg_path);
+
+        cmd.arg("-i")
+            .arg(video_path)
+            .args(["-vn", "-c:a", "libmp3lame", "-q:a", "2"])
+            .arg("-y")
+            .arg(audio_path);
+
+        let output = cmd.output().await?;
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "ffmpeg audio extraction failed for {}: {}",
+                video_path.display(),
+                error
+            );
+        }
+
+        Ok(())
     }
 
     async fn create_cropped_thumbnail(&self, original_path: &Path) -> anyhow::Result<PathBuf> {
