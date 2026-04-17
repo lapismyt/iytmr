@@ -26,5 +26,4 @@ walkdir = "2.5.0"
 yt-dlp = { version = "2.7.0", features = ["cache-redb", "hickory-dns"] }
 
 [profile.release]
-strip = true
 lto = true
