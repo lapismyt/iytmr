@@ -7,7 +7,7 @@ use teloxide::{
     types::{
         InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InlineQuery,
         InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText,
-        LinkPreviewOptions,
+        LinkPreviewOptions, Me,
     },
 };
 use yt_dlp::model::playlist::PlaylistEntry;
@@ -83,11 +83,29 @@ pub async fn handle_inline_query(
     bot: BotWrapped,
     inline_query: InlineQuery,
     downloader: Arc<Downloader>,
+    me: Me,
 ) -> anyhow::Result<()> {
     let start_time = std::time::Instant::now();
 
     let query = inline_query.query;
+
     if query.is_empty() {
+        bot.answer_inline_query(
+            inline_query.id,
+            Vec::<InlineQueryResult>::from([InlineQueryResult::Article(
+                InlineQueryResultArticle::new(
+                    get_temporary_id("type_query"),
+                    "Type a query to search for music",
+                    InputMessageContent::Text(InputMessageContentText::new(format!(
+                        include_str!("../resources/start.html"),
+                        me.username()
+                    ))),
+                ),
+            )]),
+        )
+        .await
+        .ok();
+
         return Ok(());
     }
 

@@ -1,7 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use sha2::{Digest, Sha256};
+use url::Url;
 use yt_dlp::{
+    client::{ProxyConfig, ProxyType},
     error::Error as YtDlpError,
     extractor::VideoExtractor,
     model::{format::FormatType, playlist::Playlist, selector::ThumbnailQuality},
@@ -29,14 +35,36 @@ impl Downloader {
 
         let ffmpeg_path = libs_dir.as_ref().join("ffmpeg");
 
-        let downloader = yt_dlp::Downloader::with_new_binaries(
+        let mut builder = yt_dlp::Downloader::with_new_binaries(
             PathBuf::from(libs_dir.as_ref()),
             PathBuf::from(output_dir.as_ref()),
         )
         .await?
-        .with_cache_config(cache_config)
-        .build()
-        .await?;
+        .with_cache_config(cache_config);
+
+        if let Ok(proxy_url_str) = env::var("YT_DLP_PROXY") {
+            let proxy_url = Url::from_str(&proxy_url_str)?;
+
+            match proxy_url.scheme().to_lowercase().as_str() {
+                "http" => {
+                    log::info!("Using HTTP proxy: {}", proxy_url_str);
+                    builder = builder.with_proxy(ProxyConfig::new(ProxyType::Http, proxy_url));
+                }
+                "https" => {
+                    log::info!("Using HTTPS proxy: {}", proxy_url_str);
+                    builder = builder.with_proxy(ProxyConfig::new(ProxyType::Https, proxy_url));
+                }
+                "socks5" | "socks5h" => {
+                    log::info!("Using SOCKS5 proxy: {}", proxy_url_str);
+                    builder = builder.with_proxy(ProxyConfig::new(ProxyType::Socks5, proxy_url));
+                }
+                _ => {
+                    return Err(anyhow::anyhow!("Unsupported proxy scheme"));
+                }
+            }
+        }
+
+        let downloader = builder.build().await?;
 
         Ok(Self {
             client: downloader,
@@ -174,7 +202,9 @@ impl Downloader {
             return Err(err.into());
         }
 
-        let extract_result = self.extract_audio_from_video(&temp_video_path, &audio_path).await;
+        let extract_result = self
+            .extract_audio_from_video(&temp_video_path, &audio_path)
+            .await;
         let cleanup_result = tokio::fs::remove_file(&temp_video_path).await;
 
         if let Err(err) = cleanup_result {
