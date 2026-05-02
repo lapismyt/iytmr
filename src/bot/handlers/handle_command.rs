@@ -1,9 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    env,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::anyhow;
 use teloxide::{
+    payloads::SendMessageSetters as _,
     prelude::Requester,
-    types::{ChatId, Message, UserId},
+    types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Me, Message, UserId},
 };
 
 use crate::{
@@ -57,16 +61,26 @@ pub async fn handle_command(
     command: Command,
     db: Arc<DatabaseHelper>,
     data_store: Arc<Mutex<DataStore>>,
+    me: Me,
 ) -> anyhow::Result<()> {
     let start_time = std::time::Instant::now();
 
     let chat = message.chat;
     let user = message.from.ok_or(anyhow!("No user ID found"))?;
 
+    let try_btn_kb = InlineKeyboardMarkup::new([[InlineKeyboardButton::switch_inline_query(
+        "Try now",
+        env::var("EXAMPLE_QUERY").unwrap_or("inabakumori lagtrain".to_string()),
+    )]]);
+
     match command {
         Command::Start => {
             if let Err(e) = bot
-                .send_message(chat.id, include_str!("../resources/start.html"))
+                .send_message(
+                    chat.id,
+                    format!(include_str!("../resources/start.html"), me.username()),
+                )
+                .reply_markup(try_btn_kb)
                 .await
             {
                 log::warn!("Failed to send start message: {:?}", e);
@@ -74,7 +88,11 @@ pub async fn handle_command(
         }
         Command::Help => {
             if let Err(e) = bot
-                .send_message(chat.id, include_str!("../resources/help.html"))
+                .send_message(
+                    chat.id,
+                    format!(include_str!("../resources/help.html"), me.username()),
+                )
+                .reply_markup(try_btn_kb)
                 .await
             {
                 log::warn!("Failed to send help message: {:?}", e);
