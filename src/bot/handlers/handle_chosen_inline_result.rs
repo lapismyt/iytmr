@@ -233,14 +233,24 @@ pub async fn handle_chosen_inline_result(
 
             match id {
                 Ok(video) => video,
-                Err(e) => {
-                    bot.edit_message_text_inline(
-                        &inline_message_id,
-                        format!("💥 Error: Failed to download video: {:?}", e),
-                    )
-                    .await
-                    .ok();
-                    return Err(e);
+                Err(err) => {
+                    let mut error_message =
+                        format!("💥 Error: Failed to download video: {:?}", err);
+
+                    if err.to_string().contains("Sign in to confirm your age") {
+                        let bot_age = chrono::Utc::now()
+                            - chrono::DateTime::from_timestamp_secs(1738875600).unwrap();
+
+                        error_message = format!(
+                            "💥 Error: This video is 18+, but this bot is only {:.5} years old.",
+                            (bot_age.num_days() as f64 / 365.25)
+                        );
+                    }
+
+                    bot.edit_message_text_inline(&inline_message_id, error_message)
+                        .await
+                        .ok();
+                    return Err(err);
                 }
             }
         }
