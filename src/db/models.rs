@@ -20,7 +20,7 @@ impl Default for UserInfo {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedVideo {
     pub file_id: String,
     pub title: String,
@@ -30,10 +30,4 @@ pub struct SavedVideo {
     pub expires_at: DateTime<Utc>,
     pub path: PathBuf,
     pub video_id: String,
-}
-
-impl SavedVideo {
-    pub fn is_expired(&self) -> bool {
-        Utc::now() > self.expires_at
-    }
 }

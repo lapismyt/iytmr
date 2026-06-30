@@ -2,7 +2,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use redb::{ReadableDatabase, ReadableTable as _, ReadableTableMetadata as _, TableDefinition};
 use rmp_serde::{decode, encode};
 
-use crate::db::models::{SavedVideo, UserInfo};
+use crate::db::models::UserInfo;
 
 pub mod models;
 
@@ -209,48 +209,9 @@ impl DatabaseHelper {
         Ok(())
     }
 
-    pub fn save_video(&self, saved_video: &SavedVideo) -> anyhow::Result<()> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
-            table.insert(
-                saved_video.video_id.as_str(),
-                encode::to_vec(saved_video)?.as_slice(),
-            )?;
-        }
-        write_txn.commit()?;
-
-        Ok(())
-    }
-
-    pub fn get_saved_video<V: Into<String>>(&self, video_id: V) -> Option<SavedVideo> {
-        let video_id = video_id.into();
-        let read_txn = self.db.begin_read().ok()?;
-        let table = read_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO).ok()?;
-        let value: SavedVideo =
-            decode::from_slice(table.get(video_id.as_str()).ok().flatten()?.value()).ok()?;
-
-        match value.is_expired() {
-            true => None,
-            false => Some(value),
-        }
-    }
-
     pub fn get_cached_files_count(&self) -> anyhow::Result<u64> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
         Ok(table.len()?)
-    }
-
-    pub fn delete_saved_video<V: Into<String>>(&self, video_id: V) -> anyhow::Result<()> {
-        let video_id = video_id.into();
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(VIDEO_ID_TO_SAVED_VIDEO)?;
-            table.remove(video_id.as_str())?;
-        }
-        write_txn.commit()?;
-
-        Ok(())
     }
 }

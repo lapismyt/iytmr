@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use chrono::{TimeDelta, Utc};
 use rand::RngExt;
 use teloxide::{
     payloads::{EditMessageReplyMarkupInlineSetters, SendAudioSetters},
@@ -72,26 +71,9 @@ fn get_keyboard(video_id: &str) -> anyhow::Result<InlineKeyboardMarkup> {
 pub async fn download_video(
     bot: &BotWrapped,
     downloader: Arc<Downloader>,
-    db: Arc<DatabaseHelper>,
     video_id: &str,
     data_store: Arc<Mutex<DataStore>>,
 ) -> anyhow::Result<SavedVideo> {
-    if let Some(saved_video) = db.get_saved_video(video_id) {
-        log::info!("Found saved video for {}", video_id);
-        if fs::exists(&saved_video.path).unwrap_or(false) {
-            log::info!("Saved video for {} exists, returning", video_id);
-            return Ok(saved_video);
-        } else {
-            log::info!(
-                "Saved video for {} does not exist, deleting from db",
-                video_id
-            );
-            if let Err(e) = db.delete_saved_video(video_id) {
-                log::warn!("Failed to delete saved video for {}: {}", video_id, e);
-            }
-        }
-    }
-
     log::info!("Downloading {}...", video_id);
 
     let (video, download_path, thumbnail_path) = match downloader
@@ -137,21 +119,18 @@ pub async fn download_video(
         log::error!("Failed to delete temp message: {:?}", e);
     }
 
-    let result_video = SavedVideo {
+    let result_video = crate::db::models::SavedVideo {
         file_id: audio.file.id.0.clone(),
         title,
         performer,
         duration: audio.duration.seconds(),
         thumbnail: thumbnail_path.unwrap_or_default(),
-        expires_at: Utc::now() + TimeDelta::days(7),
+        expires_at: chrono::Utc::now() + chrono::TimeDelta::days(7),
         path: download_path,
         video_id: video_id.to_string(),
     };
 
-    if let Err(e) = db.save_video(&result_video) {
-        log::error!("Failed to save video: {:?}", e);
-    }
-
+    data_store.lock().unwrap().save_file_id(result_video.clone());
     data_store.lock().unwrap().cached_files_count.increment();
     data_store
         .lock()
@@ -188,29 +167,29 @@ pub async fn handle_chosen_inline_result(
         return Ok(());
     };
 
-    let video = match db.get_saved_video(&video_id) {
-        Some(file_id) => file_id,
-        None => {
-            {
-                let count = data_store
-                    .lock()
-                    .unwrap()
-                    .active_downloads
-                    .get(&user_id)
-                    .map(|v| *v)
-                    .unwrap_or(0);
-                if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
-                    bot.edit_message_text_inline(
-                        &inline_message_id,
-                        format!(
-                            "💥 Error: You already have {} active downloads. Please wait.",
-                            *MAX_USER_PARALLEL_DOWNLOADS
-                        ),
-                    )
-                    .await
-                    .ok();
-                    return Ok(());
-                }
+    let video = {
+        if let Some(cached) = data_store.lock().unwrap().get_file_id(&video_id) {
+            log::info!("Found cached file_id for {}", video_id);
+            cached
+        } else {
+            let count = data_store
+                .lock()
+                .unwrap()
+                .active_downloads
+                .get(&user_id)
+                .map(|v| *v)
+                .unwrap_or(0);
+            if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
+                bot.edit_message_text_inline(
+                    &inline_message_id,
+                    format!(
+                        "💥 Error: You already have {} active downloads. Please wait.",
+                        *MAX_USER_PARALLEL_DOWNLOADS
+                    ),
+                )
+                .await
+                .ok();
+                return Ok(());
             }
 
             data_store
@@ -222,7 +201,7 @@ pub async fn handle_chosen_inline_result(
                 .or_insert(1);
 
             let id =
-                download_video(&bot, downloader, db.clone(), &video_id, data_store.clone()).await;
+                download_video(&bot, downloader, &video_id, data_store.clone()).await;
 
             data_store
                 .lock()

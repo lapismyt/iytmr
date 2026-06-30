@@ -6,7 +6,10 @@ use walkdir::WalkDir;
 use crate::{
     consts::{MAX_CACHE_SIZE_MB, MIN_CACHE_SIZE_MB, OUTPUT_DIR},
     db::DatabaseHelper,
+    db::models::SavedVideo,
 };
+
+const FILE_ID_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 #[derive(Debug)]
 pub struct CounterCached {
@@ -28,6 +31,7 @@ pub struct DataStore {
     pub cached_files_count: CounterCached,
     pub total_users_count: CounterCached,
     pub monthly_users_count: CounterCached,
+    pub file_id_cache: DashMap<String, (SavedVideo, std::time::Instant)>,
 }
 
 impl DataStore {
@@ -98,6 +102,25 @@ impl DataStore {
         db.as_ref().get_monthly_active_users_count().unwrap_or(0) as u64
     }
 
+    pub fn get_file_id(&self, video_id: &str) -> Option<SavedVideo> {
+        self.file_id_cache
+            .get(video_id)
+            .and_then(|entry| {
+                if entry.1.elapsed() < FILE_ID_CACHE_TTL {
+                    Some(entry.0.clone())
+                } else {
+                    drop(entry);
+                    self.file_id_cache.remove(video_id);
+                    None
+                }
+            })
+    }
+
+    pub fn save_file_id(&self, video: SavedVideo) {
+        self.file_id_cache
+            .insert(video.video_id.clone(), (video, std::time::Instant::now()));
+    }
+
     pub fn new<D: AsRef<DatabaseHelper>>(db: D) -> Self {
         Self {
             downloaded_files_count: CounterCached {
@@ -117,6 +140,7 @@ impl DataStore {
                 count: DataStore::get_cached_monthly_users_count_raw(&db),
                 updated_at: std::time::Instant::now(),
             },
+            file_id_cache: DashMap::new(),
         }
     }
 }
