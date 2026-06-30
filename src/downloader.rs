@@ -9,7 +9,7 @@ use url::Url;
 use yt_dlp::{
     client::{ProxyConfig, ProxyType},
     error::Error as YtDlpError,
-    extractor::VideoExtractor,
+    extractor::{ExtractorConfig, VideoExtractor},
     model::{format::FormatType, playlist::Playlist, selector::ThumbnailQuality},
     prelude::*,
 };
@@ -331,10 +331,9 @@ impl Downloader {
     }
 
     pub async fn search(&self, query: &str, max_results: usize) -> anyhow::Result<Playlist> {
-        Ok(self
-            .client
-            .youtube_extractor()
-            .search(query, max_results)
-            .await?)
+        let mut extractor =
+            yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
+        extractor.with_arg("--force-ipv4".to_string());
+        Ok(extractor.search(query, max_results).await?)
     }
 }
