@@ -64,7 +64,8 @@ impl Downloader {
             }
         }
 
-        let downloader = builder.build().await?;
+        let mut downloader = builder.build().await?;
+        downloader.add_arg("--force-ipv4");
 
         Ok(Self {
             client: downloader,
