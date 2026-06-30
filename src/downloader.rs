@@ -163,9 +163,10 @@ impl Downloader {
             .await
         {
             Ok(audio_path) => Ok(audio_path),
-            Err(YtDlpError::FormatNotAvailable { format_type, .. })
-                if format_type == FormatType::Audio =>
-            {
+            Err(YtDlpError::FormatNotAvailable {
+                format_type: FormatType::Audio,
+                ..
+            }) => {
                 log::warn!(
                     "No standalone audio format for {}, falling back to muxed video download",
                     video.id

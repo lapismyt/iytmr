@@ -32,10 +32,10 @@ pub fn get_title_and_perfomer(video_title: &str, video_uploader: Option<&str>) -
         false => PERFORMER_TITLE_SEPARATORS
             .iter()
             .find_map(|sep| {
-                if let Some((performer, title)) = video_title.split_once(sep) {
-                    if !title.contains(video_uploader) {
-                        return Some((title.trim(), performer.trim().to_owned()));
-                    }
+                if let Some((performer, title)) = video_title.split_once(sep)
+                    && !title.contains(video_uploader)
+                {
+                    return Some((title.trim(), performer.trim().to_string()));
                 }
                 None
             })
@@ -44,13 +44,13 @@ pub fn get_title_and_perfomer(video_title: &str, video_uploader: Option<&str>) -
                 video_uploader
                     .strip_suffix(" - Topic")
                     .unwrap_or(video_uploader)
-                    .to_owned(),
+                    .to_string(),
             )),
-        true => (video_title, video_uploader.to_owned()),
+        true => (video_title, video_uploader.to_string()),
     };
 
     let result_title = regex2
-        .replace(&regex1.replace(&result_title, "").into_owned(), "")
+        .replace(&regex1.replace(result_title, ""), "")
         .into_owned();
 
     log::info!("title: {}, performer: {}", &result_title, &result_performer);

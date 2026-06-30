@@ -5,9 +5,9 @@ pub const LIBS_DIR: &str = "libs";
 pub const CACHE_DIR: &str = "cache";
 pub const DB_PATH: &str = "iytmr.redb";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const NO_RESULTS_ID: LazyLock<String> = LazyLock::new(|| format!("no_results:{}", VERSION));
+pub static NO_RESULTS_ID: LazyLock<String> = LazyLock::new(|| format!("no_results:{}", VERSION));
 
-pub const MAX_RESULTS: LazyLock<usize> = LazyLock::new(|| {
+pub static MAX_RESULTS: LazyLock<usize> = LazyLock::new(|| {
     if let Ok(max_results) = std::env::var("MAX_RESULTS")
         && let Ok(max_results) = max_results.parse::<usize>()
     {
@@ -19,7 +19,7 @@ pub const MAX_RESULTS: LazyLock<usize> = LazyLock::new(|| {
     5
 });
 
-pub const MIN_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
+pub static MIN_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
     if let Ok(min_duration) = std::env::var("MIN_DURATION") {
         if let Ok(min_duration) = min_duration.parse::<f64>() {
             log::info!("MIN_DURATION set to {}", min_duration);
@@ -32,7 +32,7 @@ pub const MIN_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
     None
 });
 
-pub const MAX_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
+pub static MAX_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
     if let Ok(max_duration) = std::env::var("MAX_DURATION") {
         if let Ok(max_duration) = max_duration.parse::<f64>() {
             log::info!("MAX_DURATION set to {}", max_duration);
@@ -45,14 +45,14 @@ pub const MAX_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
     None
 });
 
-pub const TRASH_CHAT_ID: LazyLock<i64> = LazyLock::new(|| {
+pub static TRASH_CHAT_ID: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("TRASH_CHAT_ID")
         .unwrap()
         .parse::<i64>()
         .unwrap()
 });
 
-pub const MAX_USER_PARALLEL_DOWNLOADS: LazyLock<usize> = LazyLock::new(|| {
+pub static MAX_USER_PARALLEL_DOWNLOADS: LazyLock<usize> = LazyLock::new(|| {
     if let Ok(max_downloads) = std::env::var("MAX_USER_PARALLEL_DOWNLOADS") {
         if let Ok(max_downloads) = max_downloads.parse::<usize>() {
             log::info!("MAX_USER_PARALLEL_DOWNLOADS set to {}", max_downloads);
@@ -66,7 +66,7 @@ pub const MAX_USER_PARALLEL_DOWNLOADS: LazyLock<usize> = LazyLock::new(|| {
     2
 });
 
-pub const BLANK_PLACEHOLDER: LazyLock<String> = LazyLock::new(|| {
+pub static BLANK_PLACEHOLDER: LazyLock<String> = LazyLock::new(|| {
     if let Ok(placeholder) = std::env::var("BLANK_PLACEHOLDER") {
         log::info!("BLANK_PLACEHOLDER set to {}", placeholder);
         return placeholder;
@@ -75,7 +75,7 @@ pub const BLANK_PLACEHOLDER: LazyLock<String> = LazyLock::new(|| {
     "[[ BLANK ]]".to_string()
 });
 
-pub const MIN_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
+pub static MIN_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
     if let Ok(min_cache_size) = std::env::var("MIN_CACHE_SIZE_MB")
         && let Ok(min_cache_size) = min_cache_size.parse::<u64>()
     {
@@ -87,7 +87,7 @@ pub const MIN_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
     512
 });
 
-pub const MAX_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
+pub static MAX_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
     if let Ok(max_cache_size) = std::env::var("MAX_CACHE_SIZE_MB")
         && let Ok(max_cache_size) = max_cache_size.parse::<u64>()
     {
@@ -99,7 +99,7 @@ pub const MAX_CACHE_SIZE_MB: LazyLock<u64> = LazyLock::new(|| {
     1024
 });
 
-pub const INLINE_CACHE_TIME: LazyLock<u32> = LazyLock::new(|| {
+pub static INLINE_CACHE_TIME: LazyLock<u32> = LazyLock::new(|| {
     if let Ok(cache_time) = std::env::var("INLINE_CACHE_TIME")
         && let Ok(cache_time) = cache_time.parse::<u32>()
     {
@@ -111,7 +111,7 @@ pub const INLINE_CACHE_TIME: LazyLock<u32> = LazyLock::new(|| {
     300
 });
 
-pub const ADVERTISE_NAME: LazyLock<Option<String>> = LazyLock::new(|| {
+pub static ADVERTISE_NAME: LazyLock<Option<String>> = LazyLock::new(|| {
     if let Ok(announce_message) = std::env::var("ADVERTISE_NAME") {
         log::info!("ADVERTISE_NAME set to {}", announce_message);
         return Some(announce_message);
@@ -120,7 +120,7 @@ pub const ADVERTISE_NAME: LazyLock<Option<String>> = LazyLock::new(|| {
     None
 });
 
-pub const ADVERTISE_URL: LazyLock<Option<String>> = LazyLock::new(|| {
+pub static ADVERTISE_URL: LazyLock<Option<String>> = LazyLock::new(|| {
     if let Ok(announce_message) = std::env::var("ADVERTISE_URL") {
         log::info!("ADVERTISE_URL set to {}", announce_message);
         return Some(announce_message);
@@ -129,7 +129,7 @@ pub const ADVERTISE_URL: LazyLock<Option<String>> = LazyLock::new(|| {
     None
 });
 
-pub const ADVERTISE_CHANCE: LazyLock<u8> = LazyLock::new(|| {
+pub static ADVERTISE_CHANCE: LazyLock<u8> = LazyLock::new(|| {
     if let Ok(announce_chance) = std::env::var("ADVERTISE_CHANCE")
         && let Ok(announce_chance) = announce_chance.parse::<u8>()
     {

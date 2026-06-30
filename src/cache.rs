@@ -149,7 +149,7 @@ pub fn get_output_folder_info() -> anyhow::Result<OutputFolderInfo> {
         }
     }
 
-    files.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+    files.sort_unstable_by_key(|b| std::cmp::Reverse(b.size));
 
     Ok(OutputFolderInfo { total_size, files })
 }

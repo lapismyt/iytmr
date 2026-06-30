@@ -31,9 +31,9 @@ fn get_temporary_id(hashable: &str) -> String {
     )
 }
 
-fn is_totally_invisible(s: &str) -> bool {
-    s.chars()
-        .all(|c| c.is_whitespace() || c.is_control() || (c >= '\u{200B}' && c <= '\u{200D}'))
+fn is_totally_invisible(text: &str) -> bool {
+    text.chars()
+        .all(|c| c.is_whitespace() || c.is_control() || ('\u{200B}'..'\u{200D}').contains(&c))
 }
 
 fn playlist_entry_to_inline_query_result_article(
