@@ -336,4 +336,11 @@ impl Downloader {
         extractor.with_arg("--force-ipv4".to_string());
         Ok(extractor.search(query, max_results).await?)
     }
+
+    pub async fn fetch_video_info(&self, url: &str) -> anyhow::Result<Video> {
+        let mut extractor =
+            yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
+        extractor.with_arg("--force-ipv4".to_string());
+        Ok(extractor.fetch_video(url).await?)
+    }
 }

@@ -36,6 +36,18 @@ fn is_totally_invisible(text: &str) -> bool {
         .all(|c| c.is_whitespace() || c.is_control() || ('\u{200B}'..'\u{200D}').contains(&c))
 }
 
+fn is_youtube_url(query: &str) -> bool {
+    let q = query.trim();
+    q.starts_with("https://www.youtube.com/")
+        || q.starts_with("http://www.youtube.com/")
+        || q.starts_with("https://youtube.com/")
+        || q.starts_with("http://youtube.com/")
+        || q.starts_with("https://youtu.be/")
+        || q.starts_with("http://youtu.be/")
+        || q.starts_with("https://m.youtube.com/")
+        || q.starts_with("http://m.youtube.com/")
+}
+
 fn playlist_entry_to_inline_query_result_article(
     bot: &BotWrapped,
     vid: &PlaylistEntry,
@@ -105,6 +117,45 @@ pub async fn handle_inline_query(
         )
         .await
         .ok();
+
+        return Ok(());
+    }
+
+    if is_youtube_url(&query) {
+        let video = match downloader.fetch_video_info(query.trim()).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Failed to fetch video info for URL: {}: {}", query, e);
+                return Ok(());
+            }
+        };
+
+        let entry = PlaylistEntry {
+            id: video.id.clone(),
+            title: video.title.clone(),
+            url: video
+                .webpage_url
+                .clone()
+                .unwrap_or_else(|| format!("https://www.youtube.com/watch?v={}", video.id)),
+            index: None,
+            duration: video.duration.map(|d| d as f64),
+            thumbnail: video.thumbnail.clone(),
+            uploader: video.uploader.clone(),
+            channel_id: video.channel_id.clone(),
+            availability: video.availability.clone(),
+        };
+
+        let results: Vec<InlineQueryResult> = vec![InlineQueryResult::Article(
+            playlist_entry_to_inline_query_result_article(&bot, &entry),
+        )];
+
+        if let Err(e) = bot
+            .answer_inline_query(inline_query.id, results)
+            .cache_time(*INLINE_CACHE_TIME)
+            .await
+        {
+            log::error!("Failed to answer inline query: {}", e);
+        }
 
         return Ok(());
     }
