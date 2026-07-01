@@ -1,0 +1,25 @@
+_version: 1
+
+tt_ru:
+  start:
+    title: "<b>Мин YouTube'тан музыка йөкләү өчен инлайн-бот.</b>\n\nМине куллану өчен, языгыз <code>@%{bot_username} [трек исеме]</code> кертү кырына.\n\nСез бот статистикасын командасы белән карый аласыз /stats."
+  help:
+    title: "<b>Мин YouTube'тан музыка йөкләү өчен инлайн-бот</b>\n\nМине куллану өчен, языгыз <code>@%{bot_username} [трек исеме]</code> кертү кырына.\n\nСез бот статистикасын командасы белән карый аласыз /stats."
+  stats:
+    title: "<b>Статистика:</b>\n\nБарлыгы кулланучылар: %{total_users}\nАй эчендә актив кулланучылар: %{monthly_active_users}\nЙөкләнгән файллар: %{downloaded_files}\nКәшләнгән видеолар: %{cached_videos}\nБарлыгы йөкләүләр: %{total_downloads}\nСезнең йөкләүләр: %{your_downloads}\nТеркәлү датасы: %{register_date}"
+  inline:
+    downloading: "<b>Йөкләү \"%{performer} — %{title}\"...</b>"
+    loading: "Йөкләнү..."
+    type_query_hint: "Музыка эзләү өчен сорау кертегез"
+    no_results_title: "Нәрсә дә булса табылмады"
+    no_results_text: "Сезнең сорау буенча нәрсә дә булса табылмады."
+  chosen:
+    youtube_button: "YouTube"
+    error_decode_id: "Хата: Нәтиҗә ID-сын декодлап булмады"
+    error_rate_limit: "💥 Хата: Сездә инде %{max_downloads} актив йөкләүләр бар. Пожалуйста, көтегез."
+    error_download: "💥 Хата: Видеоны йөкләп булмады: %{error}"
+    error_age_restricted: "💥 Хата: Бу видео 18+, ә бу ботка нибары %{bot_age} ел."
+    caption: "<code>%{performer} — %{title}</code>\n"
+    footer: "✨ Түбәндәгедән йөкләнгән @{bot_username}"
+  command:
+    try_now: "Карап карарга"
