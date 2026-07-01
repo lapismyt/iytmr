@@ -5,9 +5,9 @@ start:
 help:
   title: "<b>Я инлайн-бот для скачивания музыки с YouTube.</b>\n\nЧтобы использовать меня, напишите <code>@%{bot_username} [название трека]</code> в поле ввода.\n\nВы можете посмотреть статистику бота командой /stats."
 stats:
-  title: "<b>Статистика:</b>\n\nВсего пользователей: %{total_users}\nАктивные за месяц: %{monthly_active_users}\nСкачанных файлов: %{downloaded_files}\nКэшированных видео: %{cached_videos}\nВсего скачиваний: %{total_downloads}\nВаши скачивания: %{your_downloads}\nДата регистрации: %{register_date}"
+  title: "<b>Статистика:</b>\n\nВсего пользователей: %{total_users}\nАктивных за месяц: %{monthly_active_users}\nСкачанных файлов: %{downloaded_files}\nКэшированных видео: %{cached_videos}\nВсего скачиваний: %{total_downloads}\nВаши скачивания: %{your_downloads}\nДата регистрации: %{register_date}"
 inline:
-  downloading: "<b>Скачивание \"%{performer} — %{title}\"...</b>"
+  downloading: '<b>Скачивание "%{performer} — %{title}"...</b>'
   loading: "Загрузка..."
   type_query_hint: "Введите запрос для поиска музыки"
   no_results_title: "Ничего не найдено"
@@ -19,6 +19,6 @@ chosen:
   error_download: "💥 Ошибка: Не удалось скачать видео: %{error}"
   error_age_restricted: "💥 Ошибка: Это видео 18+, но этому боту всего %{bot_age} лет."
   caption: "<code>%{performer} — %{title}</code>\n"
-  footer: "✨ Скачано с @{bot_username}"
+  footer: "✨ Скачано с @%{bot_username}"
 command:
   try_now: "Попробовать"

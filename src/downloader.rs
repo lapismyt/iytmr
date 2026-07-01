@@ -86,11 +86,10 @@ impl Downloader {
         &self,
         url: U,
     ) -> anyhow::Result<(Video, PathBuf, Option<PathBuf>)> {
-        let video = self
-            .client
-            .youtube_extractor()
-            .fetch_video(&url.into())
-            .await?;
+        let mut extractor =
+            yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
+        extractor.with_arg("--force-ipv4".to_string());
+        let video = extractor.fetch_video(&url.into()).await?;
 
         let video_id = video.id.clone();
         let video_id_hash = Downloader::sha256_hash(&video_id);
