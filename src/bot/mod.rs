@@ -8,11 +8,18 @@ use teloxide::{
     dptree,
     macros::BotCommands,
     prelude::Dispatcher,
-    types::Update,
+    types::{Update, User},
 };
 
 use crate::{bot::types::BotWrapped, cache::DataStore};
 use crate::{db::DatabaseHelper, downloader::Downloader};
+
+pub fn detect_locale(user: &User) -> &str {
+    match user.language_code.as_deref() {
+        Some("ru") | Some("uk") => "ru",
+        _ => "en",
+    }
+}
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]

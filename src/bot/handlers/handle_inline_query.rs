@@ -13,7 +13,7 @@ use teloxide::{
 use yt_dlp::model::playlist::PlaylistEntry;
 
 use crate::{
-    bot::types::BotWrapped,
+    bot::{detect_locale, types::BotWrapped},
     consts::{
         BLANK_PLACEHOLDER, INLINE_CACHE_TIME, MAX_DURATION, MAX_RESULTS, MIN_DURATION,
         NO_RESULTS_ID, VERSION,
@@ -51,6 +51,7 @@ fn is_youtube_url(query: &str) -> bool {
 fn playlist_entry_to_inline_query_result_article(
     bot: &BotWrapped,
     vid: &PlaylistEntry,
+    locale: &str,
 ) -> InlineQueryResultArticle {
     let thumbnail_url = format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", vid.id);
     let (title, performer) = get_title_and_perfomer(&vid.title, vid.uploader.as_deref());
@@ -62,7 +63,7 @@ fn playlist_entry_to_inline_query_result_article(
             false => title.clone(),
         },
         InputMessageContent::Text(InputMessageContentText {
-            message_text: format!("<b>Downloading \"{} — {}\"...</b>", performer, title),
+            message_text: t!("inline.downloading", locale = locale, performer = performer.as_str(), title = title.as_str()).to_string(),
             parse_mode: Some(bot.parse_mode()),
             entities: None,
             link_preview_options: Some(LinkPreviewOptions {
@@ -75,7 +76,7 @@ fn playlist_entry_to_inline_query_result_article(
         }),
     )
     .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-        "Loading...",
+        t!("inline.loading", locale = locale),
         InlineKeyboardButtonKind::CallbackData("loading".to_string()),
     )]]))
     .description(performer);
@@ -99,6 +100,7 @@ pub async fn handle_inline_query(
 ) -> anyhow::Result<()> {
     let start_time = std::time::Instant::now();
 
+    let locale = detect_locale(&inline_query.from);
     let query = inline_query.query;
 
     if query.is_empty() {
@@ -107,11 +109,10 @@ pub async fn handle_inline_query(
             Vec::<InlineQueryResult>::from([InlineQueryResult::Article(
                 InlineQueryResultArticle::new(
                     get_temporary_id("type_query"),
-                    "Type a query to search for music",
-                    InputMessageContent::Text(InputMessageContentText::new(format!(
-                        include_str!("../resources/start.html"),
-                        me.username()
-                    ))),
+                    t!("inline.type_query_hint", locale = locale),
+                    InputMessageContent::Text(InputMessageContentText::new(
+                        t!("start.title", locale = locale, bot_username = me.username()),
+                    )),
                 ),
             )]),
         )
@@ -146,7 +147,7 @@ pub async fn handle_inline_query(
         };
 
         let results: Vec<InlineQueryResult> = vec![InlineQueryResult::Article(
-            playlist_entry_to_inline_query_result_article(&bot, &entry),
+            playlist_entry_to_inline_query_result_article(&bot, &entry, locale),
         )];
 
         if let Err(e) = bot
@@ -169,16 +170,16 @@ pub async fn handle_inline_query(
     let mut results: Vec<InlineQueryResult> = playlist
         .into_iter()
         .map(|vid| {
-            InlineQueryResult::Article(playlist_entry_to_inline_query_result_article(&bot, vid))
+            InlineQueryResult::Article(playlist_entry_to_inline_query_result_article(&bot, vid, locale))
         })
         .collect();
 
     if results.is_empty() {
         results.push(InlineQueryResult::Article(InlineQueryResultArticle {
             id: NO_RESULTS_ID.to_string(),
-            title: "No results".to_string(),
+            title: t!("inline.no_results_title", locale = locale).to_string(),
             input_message_content: InputMessageContent::Text(InputMessageContentText {
-                message_text: "No results found for your query.".to_string(),
+                message_text: t!("inline.no_results_text", locale = locale).to_string(),
                 parse_mode: Some(bot.parse_mode()),
                 entities: None,
                 link_preview_options: None,

@@ -11,7 +11,7 @@ use teloxide::{
 };
 
 use crate::{
-    bot::{Command, types::BotWrapped},
+    bot::{Command, detect_locale, types::BotWrapped},
     cache::DataStore,
     db::DatabaseHelper,
 };
@@ -22,6 +22,7 @@ async fn handle_stats(
     user_id: UserId,
     db: Arc<DatabaseHelper>,
     data_store: Arc<Mutex<DataStore>>,
+    locale: &str,
 ) -> anyhow::Result<()> {
     let mut register_date_str = "???".to_string();
 
@@ -39,15 +40,14 @@ async fn handle_stats(
     let cached_files_count = data_store.lock().unwrap().get_cached_files_count(&db);
     let downloaded_files_count = data_store.lock().unwrap().get_downloaded_files_count();
 
-    let message = format!(
-        include_str!("../resources/stats.html"),
-        total_users,
-        monthly_active_users,
-        downloaded_files_count,
-        cached_files_count,
-        total_dl_count,
-        dl_count,
-        register_date_str,
+    let message = t!("stats.title", locale = locale,
+        total_users = total_users.to_string(),
+        monthly_active_users = monthly_active_users.to_string(),
+        downloaded_files = downloaded_files_count.to_string(),
+        cached_videos = cached_files_count.to_string(),
+        total_downloads = total_dl_count.to_string(),
+        your_downloads = dl_count.to_string(),
+        register_date = register_date_str,
     );
 
     bot.send_message(chat_id, message).await?;
@@ -67,9 +67,10 @@ pub async fn handle_command(
 
     let chat = message.chat;
     let user = message.from.ok_or(anyhow!("No user ID found"))?;
+    let locale = detect_locale(&user);
 
     let try_btn_kb = InlineKeyboardMarkup::new([[InlineKeyboardButton::switch_inline_query(
-        "Try now",
+        t!("command.try_now", locale = locale),
         env::var("EXAMPLE_QUERY").unwrap_or("inabakumori lagtrain".to_string()),
     )]]);
 
@@ -78,7 +79,7 @@ pub async fn handle_command(
             if let Err(e) = bot
                 .send_message(
                     chat.id,
-                    format!(include_str!("../resources/start.html"), me.username()),
+                    t!("start.title", locale = locale, bot_username = me.username()),
                 )
                 .reply_markup(try_btn_kb)
                 .await
@@ -90,7 +91,7 @@ pub async fn handle_command(
             if let Err(e) = bot
                 .send_message(
                     chat.id,
-                    format!(include_str!("../resources/help.html"), me.username()),
+                    t!("help.title", locale = locale, bot_username = me.username()),
                 )
                 .reply_markup(try_btn_kb)
                 .await
@@ -98,7 +99,7 @@ pub async fn handle_command(
                 log::warn!("Failed to send help message: {:?}", e);
             }
         }
-        Command::Stats => handle_stats(bot, chat.id, user.id, db, data_store).await?,
+        Command::Stats => handle_stats(bot, chat.id, user.id, db, data_store, locale).await?,
     };
 
     let elapsed = start_time.elapsed();

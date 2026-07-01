@@ -14,7 +14,7 @@ use teloxide::{
 };
 
 use crate::{
-    bot::types::BotWrapped,
+    bot::{detect_locale, types::BotWrapped},
     cache::{DataStore, cache_check},
     consts::{
         ADVERTISE_CHANCE, ADVERTISE_NAME, ADVERTISE_URL, MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID,
@@ -153,6 +153,7 @@ pub async fn handle_chosen_inline_result(
         return Ok(());
     };
 
+    let locale = detect_locale(&chosen_inline_result.from);
     let user_id = chosen_inline_result.from.id.0;
 
     let Ok(video_id) = decode_temporary_id(&chosen_inline_result.result_id) else {
@@ -160,7 +161,7 @@ pub async fn handle_chosen_inline_result(
             "Failed to decode result id: {}",
             chosen_inline_result.result_id
         );
-        bot.edit_message_text_inline(&inline_message_id, "Error: Failed to decode result id")
+        bot.edit_message_text_inline(&inline_message_id, t!("chosen.error_decode_id", locale = locale))
             .await
             .ok();
 
@@ -182,10 +183,7 @@ pub async fn handle_chosen_inline_result(
             if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
                 bot.edit_message_text_inline(
                     &inline_message_id,
-                    format!(
-                        "💥 Error: You already have {} active downloads. Please wait.",
-                        *MAX_USER_PARALLEL_DOWNLOADS
-                    ),
+                    t!("chosen.error_rate_limit", locale = locale, max_downloads = (*MAX_USER_PARALLEL_DOWNLOADS).to_string()),
                 )
                 .await
                 .ok();
@@ -214,15 +212,16 @@ pub async fn handle_chosen_inline_result(
                 Ok(video) => video,
                 Err(err) => {
                     let mut error_message =
-                        format!("💥 Error: Failed to download video: {:?}", err);
+                        t!("chosen.error_download", locale = locale, error = format!("{:?}", err));
 
                     if err.to_string().contains("Sign in to confirm your age") {
                         let bot_age = chrono::Utc::now()
                             - chrono::DateTime::from_timestamp_secs(1738875600).unwrap();
 
-                        error_message = format!(
-                            "💥 Error: This video is 18+, but this bot is only {:.5} years old.",
-                            (bot_age.num_days() as f64 / 365.25)
+                        error_message = t!(
+                            "chosen.error_age_restricted",
+                            locale = locale,
+                            bot_age = format!("{:.5}", bot_age.num_days() as f64 / 365.25)
                         );
                     }
 
@@ -235,10 +234,10 @@ pub async fn handle_chosen_inline_result(
         }
     };
 
-    let mut text = format!("<code>{} — {}</code>\n", &video.performer, &video.title);
+    let mut text = t!("chosen.caption", locale = locale, performer = video.performer.as_str(), title = video.title.as_str()).to_string();
 
     if let Ok(me) = bot.get_me().await {
-        text += &format!("✨ Downloaded with @{}", me.username());
+        text += t!("chosen.footer", locale = locale, bot_username = me.username()).as_ref();
     }
 
     let mut input_media_audio =

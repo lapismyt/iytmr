@@ -4,6 +4,11 @@ use teloxide::{Bot, prelude::RequesterExt, types::ParseMode};
 
 use crate::{cache::DataStore, db::DatabaseHelper, downloader::Downloader};
 
+#[macro_use]
+extern crate rust_i18n;
+
+i18n!("locales", fallback = "en");
+
 mod bot;
 mod cache;
 mod consts;

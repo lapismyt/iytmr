@@ -1,0 +1,25 @@
+_version: 1
+
+en:
+  start:
+    title: "<b>I'm inline bot for downloading music from YouTube.</b>\n\nTo use me, type <code>@%{bot_username} [track name]</code> in the message box.\n\nYou can check bot statistics with /stats command."
+  help:
+    title: "<b>I'm inline bot for downloading music from YouTube.</b>\n\nTo use me, type <code>@%{bot_username} [track name]</code> in the message box.\n\nYou can check bot statistics with /stats command."
+  stats:
+    title: "<b>Stats:</b>\n\nTotal users: %{total_users}\nMonthly active users: %{monthly_active_users}\nDownloaded files: %{downloaded_files}\nCached videos: %{cached_videos}\nTotal downloads: %{total_downloads}\nYour downloads: %{your_downloads}\nYour register date: %{register_date}"
+  inline:
+    downloading: "<b>Downloading \"%{performer} — %{title}\"...</b>"
+    loading: "Loading..."
+    type_query_hint: "Type a query to search for music"
+    no_results_title: "No results"
+    no_results_text: "No results found for your query."
+  chosen:
+    youtube_button: "YouTube"
+    error_decode_id: "Error: Failed to decode result id"
+    error_rate_limit: "💥 Error: You already have %{max_downloads} active downloads. Please wait."
+    error_download: "💥 Error: Failed to download video: %{error}"
+    error_age_restricted: "💥 Error: This video is 18+, but this bot is only %{bot_age} years old."
+    caption: "<code>%{performer} — %{title}</code>\n"
+    footer: "✨ Downloaded with @%{bot_username}"
+  command:
+    try_now: "Try now"
