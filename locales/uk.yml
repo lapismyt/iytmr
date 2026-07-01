@@ -1,25 +1,24 @@
 _version: 1
 
-uk:
-  start:
-    title: "<b>Я інлайн-бот для завантаження музики з YouTube.</b>\n\nЩоб використати мене, напиши <code>@%{bot_username} [назва трека]</code> в полі вводу.\n\nВи можете дивитися статистику бота за допомогою команди /stats."
-  help:
-    title: "<b>Я інлайн-бот для завантаження музики з YouTube.</b>\n\nЩоб використати мене, напиши <code>@%{bot_username} [назва трека]</code> в полі вводу.\n\nВи можете дивитися статистику бота за допомогою команди /stats."
-  stats:
-    title: "<b>Статистика:</b>\n\nУсього користувачів: %{total_users}\nАктивін за місяць: %{monthly_active_users}\nЗавантажених файлів: %{downloaded_files}\nКешованих відео: %{cached_videos}\nУсього завантажень: %{total_downloads}\nВаших завантажень: %{your_downloads}\nДата реєстрації: %{register_date}"
-  inline:
-    downloading: "<b>Завантаження «%{performer} — %{title}»…</b>"
-    loading: "Завантаження…"
-    type_query_hint: "Уведіть запит для пошуку музики"
-    no_results_title: "Нічого не знайдено"
-    no_results_text: "За вашим запитом нічого не знайдено."
-  chosen:
-    youtube_button: "YouTube"
-    error_decode_id: "Помилка: Не вдалося декодувати ID результату"
-    error_rate_limit: "💥 Помилка: У вас уже %{max_downloads} активних завантажень. Будь ласка, зачекайте."
-    error_download: "💥 Помилка: Не вдалося завантажити відео %{error}"
-    error_age_restricted: "💥 Помилка: Це відео 18+, але цьому боту лише %{bot_age} років."
-    caption: "<code>%{performer} — %{title}</code>\n"
-    footer: "✨ Завантажено з @{bot_username}"
-  command:
-    try_now: "Спробувати"
+start:
+  title: "<b>Я інлайн-бот для завантаження музики з YouTube.</b>\n\nЩоб використати мене, напиши <code>@%{bot_username} [назва трека]</code> в полі вводу.\n\nВи можете дивитися статистику бота за допомогою команди /stats."
+help:
+  title: "<b>Я інлайн-бот для завантаження музики з YouTube.</b>\n\nЩоб використати мене, напиши <code>@%{bot_username} [назва трека]</code> в полі вводу.\n\nВи можете дивитися статистику бота за допомогою команди /stats."
+stats:
+  title: "<b>Статистика:</b>\n\nУсього користувачів: %{total_users}\nАктивін за місяць: %{monthly_active_users}\nЗавантажених файлів: %{downloaded_files}\nКешованих відео: %{cached_videos}\nУсього завантажень: %{total_downloads}\nВаших завантажень: %{your_downloads}\nДата реєстрації: %{register_date}"
+inline:
+  downloading: "<b>Завантаження «%{performer} — %{title}»…</b>"
+  loading: "Завантаження…"
+  type_query_hint: "Уведіть запит для пошуку музики"
+  no_results_title: "Нічого не знайдено"
+  no_results_text: "За вашим запитом нічого не знайдено."
+chosen:
+  youtube_button: "YouTube"
+  error_decode_id: "Помилка: Не вдалося декодувати ID результату"
+  error_rate_limit: "💥 Помилка: У вас уже %{max_downloads} активних завантажень. Будь ласка, зачекайте."
+  error_download: "💥 Помилка: Не вдалося завантажити відео %{error}"
+  error_age_restricted: "💥 Помилка: Це відео 18+, але цьому боту лише %{bot_age} років."
+  caption: "<code>%{performer} — %{title}</code>\n"
+  footer: "✨ Завантажено з @{bot_username}"
+command:
+  try_now: "Спробувати"
