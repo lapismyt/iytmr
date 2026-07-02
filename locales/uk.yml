@@ -19,6 +19,6 @@ chosen:
   error_download: "💥 Помилка: Не вдалося завантажити відео %{error}"
   error_age_restricted: "💥 Помилка: Це відео 18+, але цьому боту лише %{bot_age} років."
   caption: "<code>%{performer} — %{title}</code>\n"
-  footer: "✨ Завантажено з @{bot_username}"
+  footer: "✨ Завантажено з @%{bot_username}"
 command:
   try_now: "Спробувати"
