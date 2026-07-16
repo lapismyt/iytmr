@@ -31,4 +31,4 @@ yt-dlp = { version = "2.7.2", features = ["hickory-dns", "cache-memory", "cache-
 yt-dlp = { git = "https://github.com/lapismyt/yt-dlp" }
 
 [profile.release]
-lto = true
+lto = "thin"
