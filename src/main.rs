@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use teloxide::{Bot, prelude::RequesterExt, types::ParseMode};
 
@@ -18,14 +19,14 @@ mod parser;
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().unwrap();
+    let _ = dotenvy::dotenv_override();
     pretty_env_logger::init();
 
     log::info!("Initializing downloader...");
     let downloader = Arc::new(
         Downloader::new(consts::OUTPUT_DIR, consts::CACHE_DIR, consts::LIBS_DIR)
             .await
-            .unwrap(),
+            .expect("downloader must be initialized correctly"),
     );
 
     log::info!("Initializing database...");

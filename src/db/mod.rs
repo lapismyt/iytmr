@@ -17,7 +17,7 @@ pub struct DatabaseHelper {
 
 impl DatabaseHelper {
     pub fn new(db_path: &str) -> Self {
-        let db = redb::Database::create(db_path).unwrap();
+        let db = redb::Database::create(db_path).expect("database must be valid");
         Self { db }
     }
 

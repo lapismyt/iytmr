@@ -54,7 +54,9 @@ fn playlist_entry_to_inline_query_result_article(
     locale: &str,
 ) -> InlineQueryResultArticle {
     let thumbnail_url = format!("https://i.ytimg.com/vi/{}/maxresdefault.jpg", vid.id);
-    let (title, performer) = get_title_and_perfomer(&vid.title, vid.uploader.as_deref());
+    let track_title_performer = get_title_and_perfomer(&vid.title, vid.uploader.as_deref());
+
+    let (title, performer) = (track_title_performer.title, track_title_performer.performer);
 
     let mut article = InlineQueryResultArticle::new(
         get_temporary_id(&vid.id),
@@ -63,7 +65,13 @@ fn playlist_entry_to_inline_query_result_article(
             false => title.clone(),
         },
         InputMessageContent::Text(InputMessageContentText {
-            message_text: t!("inline.downloading", locale = locale, performer = performer.as_str(), title = title.as_str()).to_string(),
+            message_text: t!(
+                "inline.downloading",
+                locale = locale,
+                performer = performer.as_str(),
+                title = title.as_str()
+            )
+            .to_string(),
             parse_mode: Some(bot.parse_mode()),
             entities: None,
             link_preview_options: Some(LinkPreviewOptions {
@@ -110,9 +118,11 @@ pub async fn handle_inline_query(
                 InlineQueryResultArticle::new(
                     get_temporary_id("type_query"),
                     t!("inline.type_query_hint", locale = locale),
-                    InputMessageContent::Text(InputMessageContentText::new(
-                        t!("start.title", locale = locale, bot_username = me.username()),
-                    )),
+                    InputMessageContent::Text(InputMessageContentText::new(t!(
+                        "start.title",
+                        locale = locale,
+                        bot_username = me.username()
+                    ))),
                 ),
             )]),
         )
@@ -170,7 +180,9 @@ pub async fn handle_inline_query(
     let mut results: Vec<InlineQueryResult> = playlist
         .into_iter()
         .map(|vid| {
-            InlineQueryResult::Article(playlist_entry_to_inline_query_result_article(&bot, vid, locale))
+            InlineQueryResult::Article(playlist_entry_to_inline_query_result_article(
+                &bot, vid, locale,
+            ))
         })
         .collect();
 

@@ -47,9 +47,9 @@ pub static MAX_DURATION: LazyLock<Option<f64>> = LazyLock::new(|| {
 
 pub static TRASH_CHAT_ID: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("TRASH_CHAT_ID")
-        .unwrap()
+        .expect("trash chat id must be present")
         .parse::<i64>()
-        .unwrap()
+        .expect("trash chat id must be valid i64")
 });
 
 pub static MAX_USER_PARALLEL_DOWNLOADS: LazyLock<usize> = LazyLock::new(|| {

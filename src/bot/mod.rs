@@ -1,7 +1,8 @@
 mod handlers;
 pub mod types;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use teloxide::{
     dispatching::{HandlerExt as _, UpdateFilterExt},

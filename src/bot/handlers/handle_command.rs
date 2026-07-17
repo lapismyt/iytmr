@@ -32,23 +32,29 @@ async fn handle_stats(
 
     let dl_count = db.get_user_dl_count(&user_id.0);
     let total_dl_count = db.get_total_dl_count().unwrap_or(0);
-    let total_users = data_store.lock().unwrap().get_total_users_count(&db);
-    let monthly_active_users = data_store
-        .lock()
-        .unwrap()
-        .get_cached_monthly_users_count(&db);
-    let cached_files_count = data_store.lock().unwrap().get_cached_files_count(&db);
-    let downloaded_files_count = data_store.lock().unwrap().get_downloaded_files_count();
 
-    let message = t!("stats.title", locale = locale,
-        total_users = total_users.to_string(),
-        monthly_active_users = monthly_active_users.to_string(),
-        downloaded_files = downloaded_files_count.to_string(),
-        cached_videos = cached_files_count.to_string(),
-        total_downloads = total_dl_count.to_string(),
-        your_downloads = dl_count.to_string(),
-        register_date = register_date_str,
-    );
+    let message = {
+        let mut data_store_guard = data_store
+            .lock()
+            .expect("database mutex must not be poisoned");
+
+        let total_users = data_store_guard.get_total_users_count(&db);
+        let monthly_active_users = data_store_guard.get_cached_monthly_users_count(&db);
+        let cached_files_count = data_store_guard.get_cached_files_count(&db);
+        let downloaded_files_count = data_store_guard.get_downloaded_files_count();
+
+        t!(
+            "stats.title",
+            locale = locale,
+            total_users = total_users.to_string(),
+            monthly_active_users = monthly_active_users.to_string(),
+            downloaded_files = downloaded_files_count.to_string(),
+            cached_videos = cached_files_count.to_string(),
+            total_downloads = total_dl_count.to_string(),
+            your_downloads = dl_count.to_string(),
+            register_date = register_date_str,
+        )
+    };
 
     bot.send_message(chat_id, message).await?;
 

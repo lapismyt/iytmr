@@ -1,7 +1,5 @@
-use std::{
-    fs,
-    sync::{Arc, Mutex},
-};
+use std::{fs, sync::Arc};
+use tokio::sync::Mutex;
 
 use rand::RngExt;
 use teloxide::{
@@ -72,7 +70,7 @@ pub async fn download_video(
     bot: &BotWrapped,
     downloader: Arc<Downloader>,
     video_id: &str,
-    data_store: Arc<Mutex<DataStore>>,
+    data_store: &mut DataStore,
 ) -> anyhow::Result<SavedVideo> {
     log::info!("Downloading {}...", video_id);
 
@@ -86,7 +84,9 @@ pub async fn download_video(
         }
     };
 
-    let (title, performer) = get_title_and_perfomer(&video.title, video.uploader.as_deref());
+    let track_title_performer = get_title_and_perfomer(&video.title, video.uploader.as_deref());
+
+    let (title, performer) = (track_title_performer.title, track_title_performer.performer);
 
     log::info!("Downloaded {}, getting file id", video_id);
 
@@ -130,13 +130,9 @@ pub async fn download_video(
         video_id: video_id.to_string(),
     };
 
-    data_store.lock().unwrap().save_file_id(result_video.clone());
-    data_store.lock().unwrap().cached_files_count.increment();
-    data_store
-        .lock()
-        .unwrap()
-        .downloaded_files_count
-        .increment();
+    data_store.save_file_id(result_video.clone());
+    data_store.cached_files_count.increment();
+    data_store.downloaded_files_count.increment();
 
     Ok(result_video)
 }
@@ -161,21 +157,24 @@ pub async fn handle_chosen_inline_result(
             "Failed to decode result id: {}",
             chosen_inline_result.result_id
         );
-        bot.edit_message_text_inline(&inline_message_id, t!("chosen.error_decode_id", locale = locale))
-            .await
-            .ok();
+        bot.edit_message_text_inline(
+            &inline_message_id,
+            t!("chosen.error_decode_id", locale = locale),
+        )
+        .await
+        .ok();
 
         return Ok(());
     };
 
     let video = {
-        if let Some(cached) = data_store.lock().unwrap().get_file_id(&video_id) {
+        if let Some(cached) = data_store.lock().await.get_file_id(&video_id) {
             log::info!("Found cached file_id for {}", video_id);
             cached
         } else {
             let count = data_store
                 .lock()
-                .unwrap()
+                .await
                 .active_downloads
                 .get(&user_id)
                 .map(|v| *v)
@@ -183,40 +182,49 @@ pub async fn handle_chosen_inline_result(
             if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
                 bot.edit_message_text_inline(
                     &inline_message_id,
-                    t!("chosen.error_rate_limit", locale = locale, max_downloads = (*MAX_USER_PARALLEL_DOWNLOADS).to_string()),
+                    t!(
+                        "chosen.error_rate_limit",
+                        locale = locale,
+                        max_downloads = (*MAX_USER_PARALLEL_DOWNLOADS).to_string()
+                    ),
                 )
                 .await
                 .ok();
                 return Ok(());
             }
 
-            data_store
-                .lock()
-                .unwrap()
-                .active_downloads
-                .entry(user_id)
-                .and_modify(|v| *v += 1)
-                .or_insert(1);
+            let id = {
+                let mut data_store_guard = data_store.lock().await;
 
-            let id =
-                download_video(&bot, downloader, &video_id, data_store.clone()).await;
+                data_store_guard
+                    .active_downloads
+                    .entry(user_id)
+                    .and_modify(|v| *v += 1)
+                    .or_insert(1);
 
-            data_store
-                .lock()
-                .unwrap()
-                .active_downloads
-                .entry(user_id)
-                .and_modify(|v| *v -= 1);
+                let id = download_video(&bot, downloader, &video_id, &mut data_store_guard).await;
+
+                data_store_guard
+                    .active_downloads
+                    .entry(user_id)
+                    .and_modify(|v| *v -= 1);
+
+                id
+            };
 
             match id {
                 Ok(video) => video,
                 Err(err) => {
-                    let mut error_message =
-                        t!("chosen.error_download", locale = locale, error = format!("{:?}", err));
+                    let mut error_message = t!(
+                        "chosen.error_download",
+                        locale = locale,
+                        error = format!("{:?}", err)
+                    );
 
                     if err.to_string().contains("Sign in to confirm your age") {
                         let bot_age = chrono::Utc::now()
-                            - chrono::DateTime::from_timestamp_secs(1738875600).unwrap();
+                            - chrono::DateTime::from_timestamp_secs(1738875600)
+                                .expect("bot creation timestamp must be valid");
 
                         error_message = t!(
                             "chosen.error_age_restricted",
@@ -234,10 +242,21 @@ pub async fn handle_chosen_inline_result(
         }
     };
 
-    let mut text = t!("chosen.caption", locale = locale, performer = video.performer.as_str(), title = video.title.as_str()).to_string();
+    let mut text = t!(
+        "chosen.caption",
+        locale = locale,
+        performer = video.performer.as_str(),
+        title = video.title.as_str()
+    )
+    .to_string();
 
     if let Ok(me) = bot.get_me().await {
-        text += t!("chosen.footer", locale = locale, bot_username = me.username()).as_ref();
+        text += t!(
+            "chosen.footer",
+            locale = locale,
+            bot_username = me.username()
+        )
+        .as_ref();
     }
 
     let mut input_media_audio =
