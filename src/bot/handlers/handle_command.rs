@@ -32,9 +32,7 @@ async fn handle_stats(
     let total_dl_count = db.get_total_dl_count().unwrap_or(0);
 
     let message = {
-        let mut data_store_guard = data_store
-            .lock()
-            .expect("database mutex must not be poisoned");
+        let mut data_store_guard = data_store.lock().await;
 
         let total_users = data_store_guard.get_total_users_count(&db);
         let monthly_active_users = data_store_guard.get_cached_monthly_users_count(&db);
