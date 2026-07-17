@@ -1,7 +1,5 @@
-use std::{
-    env,
-    sync::{Arc, Mutex},
-};
+use std::{env, sync::Arc};
+use tokio::sync::Mutex;
 
 use anyhow::anyhow;
 use teloxide::{
