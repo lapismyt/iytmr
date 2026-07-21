@@ -17,7 +17,6 @@ use yt_dlp::{
 pub struct Downloader {
     client: yt_dlp::Downloader,
     ffmpeg_path: PathBuf,
-    ffprobe_path: PathBuf,
     quality: yt_dlp::model::AudioQuality,
     codec: yt_dlp::model::AudioCodecPreference,
     output_dir: PathBuf,
@@ -35,7 +34,6 @@ impl Downloader {
             .build();
 
         let ffmpeg_path = libs_dir.as_ref().join("ffmpeg");
-        let ffprobe_path = libs_dir.as_ref().join("ffprobe");
 
         let mut builder = yt_dlp::Downloader::with_new_binaries(
             PathBuf::from(libs_dir.as_ref()),
@@ -72,7 +70,6 @@ impl Downloader {
         Ok(Self {
             client: downloader,
             ffmpeg_path,
-            ffprobe_path,
             quality: yt_dlp::model::AudioQuality::Best,
             codec: yt_dlp::model::AudioCodecPreference::MP3,
             output_dir: PathBuf::from(output_dir.as_ref()),
@@ -286,35 +283,30 @@ impl Downloader {
     }
 
     async fn get_audio_duration(&self, audio_path: &Path) -> anyhow::Result<f64> {
-        let output = tokio::process::Command::new(&self.ffprobe_path)
-            .arg("-v")
-            .arg("error")
-            .arg("-show_entries")
-            .arg("format=duration")
-            .arg("-of")
-            .arg("default=noprint_wrappers=1:nokey=1")
+        let output = tokio::process::Command::new(&self.ffmpeg_path)
+            .arg("-i")
             .arg(audio_path)
             .output()
             .await?;
 
-        if !output.status.success() {
-            anyhow::bail!(
-                "ffprobe failed for {}: {}",
-                audio_path.display(),
-                String::from_utf8_lossy(&output.stderr)
-            );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stderr.lines() {
+            if let Some(rest) = line.trim().strip_prefix("Duration:") {
+                let time_str = rest.split(',').next().unwrap_or(rest).trim();
+                let parts: Vec<&str> = time_str.split(':').collect();
+                if parts.len() == 3 {
+                    let h: f64 = parts[0].parse()?;
+                    let m: f64 = parts[1].parse()?;
+                    let s: f64 = parts[2].parse()?;
+                    return Ok(h * 3600.0 + m * 60.0 + s);
+                }
+            }
         }
 
-        let duration_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let duration: f64 = duration_str.parse().map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to parse duration '{}' from ffprobe: {}",
-                duration_str,
-                e
-            )
-        })?;
-
-        Ok(duration)
+        anyhow::bail!(
+            "Could not parse duration from ffmpeg output for {}",
+            audio_path.display()
+        )
     }
 
     async fn verify_audio_integrity(
