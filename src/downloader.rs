@@ -17,6 +17,7 @@ use yt_dlp::{
 pub struct Downloader {
     client: yt_dlp::Downloader,
     ffmpeg_path: PathBuf,
+    ffprobe_path: PathBuf,
     quality: yt_dlp::model::AudioQuality,
     codec: yt_dlp::model::AudioCodecPreference,
     output_dir: PathBuf,
@@ -34,6 +35,7 @@ impl Downloader {
             .build();
 
         let ffmpeg_path = libs_dir.as_ref().join("ffmpeg");
+        let ffprobe_path = libs_dir.as_ref().join("ffprobe");
 
         let mut builder = yt_dlp::Downloader::with_new_binaries(
             PathBuf::from(libs_dir.as_ref()),
@@ -70,6 +72,7 @@ impl Downloader {
         Ok(Self {
             client: downloader,
             ffmpeg_path,
+            ffprobe_path,
             quality: yt_dlp::model::AudioQuality::Best,
             codec: yt_dlp::model::AudioCodecPreference::MP3,
             output_dir: PathBuf::from(output_dir.as_ref()),
@@ -137,6 +140,22 @@ impl Downloader {
             .await
         {
             log::error!("Failed to add metadata to {}: {}", audio_path.display(), e);
+        }
+
+        // Verify integrity before returning — never return a corrupt file
+        if let Err(e) = self
+            .verify_audio_integrity(&audio_path, video.duration.map(|d| d as f64))
+            .await
+        {
+            let _ = tokio::fs::remove_file(&audio_path).await;
+            if let Some(ref thumb) = cropped_thumbnail_path {
+                let _ = tokio::fs::remove_file(thumb).await;
+            }
+            return Err(anyhow::anyhow!(
+                "Audio integrity check failed for {}: {}",
+                video_id,
+                e
+            ));
         }
 
         // Clean up original thumbnail file if it exists
@@ -264,6 +283,63 @@ impl Downloader {
         }
 
         Ok(cropped_path)
+    }
+
+    async fn get_audio_duration(&self, audio_path: &Path) -> anyhow::Result<f64> {
+        let output = tokio::process::Command::new(&self.ffprobe_path)
+            .arg("-v")
+            .arg("error")
+            .arg("-show_entries")
+            .arg("format=duration")
+            .arg("-of")
+            .arg("default=noprint_wrappers=1:nokey=1")
+            .arg(audio_path)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "ffprobe failed for {}: {}",
+                audio_path.display(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let duration_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let duration: f64 = duration_str.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse duration '{}' from ffprobe: {}",
+                duration_str,
+                e
+            )
+        })?;
+
+        Ok(duration)
+    }
+
+    async fn verify_audio_integrity(
+        &self,
+        audio_path: &Path,
+        expected_duration: Option<f64>,
+    ) -> anyhow::Result<()> {
+        let metadata = tokio::fs::metadata(audio_path).await?;
+        if metadata.len() == 0 {
+            anyhow::bail!("Audio file is empty: {}", audio_path.display());
+        }
+
+        if let Some(expected) = expected_duration {
+            let actual = self.get_audio_duration(audio_path).await?;
+            if (actual - expected).abs() > 1.0 {
+                let _ = tokio::fs::remove_file(audio_path).await;
+                anyhow::bail!(
+                    "Audio duration mismatch: expected {:.1}s, got {:.1}s",
+                    expected,
+                    actual
+                );
+            }
+        }
+
+        Ok(())
     }
 
     async fn add_metadata_manual(
