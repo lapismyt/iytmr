@@ -10,8 +10,9 @@ use yt_dlp::{
     client::{ProxyConfig, ProxyType},
     error::Error as YtDlpError,
     extractor::{ExtractorConfig, VideoExtractor},
-    model::{format::FormatType, playlist::Playlist, selector::ThumbnailQuality},
+    model::{playlist::Playlist, selector::ThumbnailQuality},
     prelude::*,
+    VideoSelection,
 };
 
 pub struct Downloader {
@@ -96,7 +97,7 @@ impl Downloader {
 
         let audio_filename = format!("{}.mp3", video_id_hash);
 
-        let audio_path = self
+        let (audio_path, format_id) = self
             .download_audio_with_fallback(&video, &audio_filename)
             .await?;
 
@@ -145,6 +146,10 @@ impl Downloader {
             .await
         {
             let _ = tokio::fs::remove_file(&audio_path).await;
+            // Invalidate yt-dlp file cache so retry downloads fresh
+            self.client
+                .invalidate_download_cache(&video_id, &format_id)
+                .await;
             if let Some(ref thumb) = cropped_thumbnail_path {
                 let _ = tokio::fs::remove_file(thumb).await;
             }
@@ -167,39 +172,48 @@ impl Downloader {
         &self,
         video: &Video,
         audio_filename: &str,
-    ) -> anyhow::Result<PathBuf> {
-        match self
-            .client
-            .download_audio_stream_with_quality(
-                video,
-                audio_filename,
-                self.quality,
-                self.codec.clone(),
-            )
-            .await
-        {
-            Ok(audio_path) => Ok(audio_path),
-            Err(YtDlpError::FormatNotAvailable {
-                format_type: FormatType::Audio,
-                ..
-            }) => {
-                log::warn!(
-                    "No standalone audio format for {}, falling back to muxed video download",
-                    video.id
-                );
-                self.download_muxed_video_and_extract_audio(video, audio_filename)
-                    .await
+    ) -> anyhow::Result<(PathBuf, String)> {
+        let audio_path = self.output_dir.join(audio_filename);
+
+        // Try to select and download a standalone audio format
+        if let Some(format) = video.select_audio_format(self.quality, self.codec.clone()) {
+            let format_id = format.format_id.clone();
+            match self
+                .client
+                .download_format_to_path(format, &audio_path)
+                .await
+            {
+                Ok(path) => return Ok((path, format_id)),
+                Err(YtDlpError::FormatNotAvailable { .. }) => {
+                    log::warn!(
+                        "Selected audio format {} unavailable for {}, falling back to muxed",
+                        format_id,
+                        video.id
+                    );
+                }
+                Err(err) => return Err(err.into()),
             }
-            Err(err) => Err(err.into()),
         }
+
+        // Fallback: download muxed video and extract audio
+        log::warn!(
+            "No standalone audio format for {}, falling back to muxed video download",
+            video.id
+        );
+        let combined_format = video.best_audio_video_format()?;
+        let format_id = combined_format.format_id.clone();
+        let path = self
+            .download_muxed_video_and_extract_audio(video, audio_filename, combined_format)
+            .await?;
+        Ok((path, format_id))
     }
 
     async fn download_muxed_video_and_extract_audio(
         &self,
         video: &Video,
         audio_filename: &str,
+        combined_format: &yt_dlp::model::format::Format,
     ) -> anyhow::Result<PathBuf> {
-        let combined_format = video.best_audio_video_format()?;
         let temp_video_path = self.output_dir.join(format!(
             "{}.fallback.{}",
             Path::new(audio_filename)

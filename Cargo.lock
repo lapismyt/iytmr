@@ -116,7 +116,7 @@ checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1934,7 +1934,7 @@ dependencies = [
 [[package]]
 name = "media-seek"
 version = "0.4.0"
-source = "git+https://github.com/lapismyt/yt-dlp#0101ff8f9baf892c289efd80cf139aff588f0ba0"
+source = "git+https://github.com/lapismyt/yt-dlp#18a79b4efabbd7f85798e0df69494c0ae83c1f48"
 dependencies = [
  "futures-util",
  "thiserror",
@@ -2551,7 +2551,7 @@ checksum = "2c9283685feec7d69af75fb0e858d5e7378f33fe4fc699383b2916ab9273e03c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -3006,7 +3006,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -3409,9 +3409,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3607,7 +3607,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -3715,9 +3715,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -4470,8 +4470,8 @@ dependencies = [
 
 [[package]]
 name = "yt-dlp"
-version = "2.7.2"
-source = "git+https://github.com/lapismyt/yt-dlp#0101ff8f9baf892c289efd80cf139aff588f0ba0"
+version = "2.7.3"
+source = "git+https://github.com/lapismyt/yt-dlp#18a79b4efabbd7f85798e0df69494c0ae83c1f48"
 dependencies = [
  "async-trait",
  "cfg-if",
