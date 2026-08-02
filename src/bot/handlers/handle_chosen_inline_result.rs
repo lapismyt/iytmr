@@ -84,7 +84,7 @@ pub async fn download_video(
             Ok(video) => return Ok(video),
             Err(e) => {
                 log::warn!(
-                    "Download attempt {}/{} failed for {}: {}",
+                    "Download attempt {}/{} failed for {}: {:#}",
                     attempt,
                     max_retries,
                     video_id,
@@ -123,6 +123,15 @@ async fn download_video_inner(
 
     log::info!("Downloaded {}, getting file id", video_id);
 
+    match tokio::fs::metadata(&download_path).await {
+        Ok(meta) => log::info!(
+            "Sending audio to trash chat: size={}MB, path={}",
+            meta.len() as f64 / 1_048_576.0,
+            download_path.display()
+        ),
+        Err(e) => log::warn!("Cannot read file metadata for {}: {}", download_path.display(), e),
+    }
+
     let mut send_audio = bot
         .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
         .title(&title)
@@ -135,7 +144,7 @@ async fn download_video_inner(
     let tmp_msg = match send_audio.await {
         Ok(msg) => msg,
         Err(e) => {
-            return Err(anyhow::anyhow!("Failed to get file id for audio: {}", e));
+            return Err(anyhow::anyhow!("Failed to get file id for audio: {:#}", e));
         }
     };
 
