@@ -13,7 +13,7 @@ use teloxide::{
 use yt_dlp::model::playlist::PlaylistEntry;
 
 use crate::{
-    bot::{detect_locale, types::BotWrapped},
+    bot::{detect_locale, errors::log_request_error, types::BotWrapped},
     consts::{
         BLANK_PLACEHOLDER, INLINE_CACHE_TIME, MAX_DURATION, MAX_RESULTS, MIN_DURATION,
         NO_RESULTS_ID, VERSION,
@@ -112,22 +112,25 @@ pub async fn handle_inline_query(
     let query = inline_query.query;
 
     if query.is_empty() {
-        bot.answer_inline_query(
-            inline_query.id,
-            Vec::<InlineQueryResult>::from([InlineQueryResult::Article(
-                InlineQueryResultArticle::new(
-                    get_temporary_id("type_query"),
-                    t!("inline.type_query_hint", locale = locale),
-                    InputMessageContent::Text(InputMessageContentText::new(t!(
-                        "start.title",
-                        locale = locale,
-                        bot_username = me.username()
-                    ))),
-                ),
-            )]),
-        )
-        .await
-        .ok();
+        if let Err(error) = bot
+            .answer_inline_query(
+                inline_query.id,
+                Vec::<InlineQueryResult>::from([InlineQueryResult::Article(
+                    InlineQueryResultArticle::new(
+                        get_temporary_id("type_query"),
+                        t!("inline.type_query_hint", locale = locale),
+                        InputMessageContent::Text(InputMessageContentText::new(t!(
+                            "start.title",
+                            locale = locale,
+                            bot_username = me.username()
+                        ))),
+                    ),
+                )]),
+            )
+            .await
+        {
+            log_request_error("Failed to answer empty inline query", &error);
+        }
 
         return Ok(());
     }
@@ -165,7 +168,7 @@ pub async fn handle_inline_query(
             .cache_time(*INLINE_CACHE_TIME)
             .await
         {
-            log::error!("Failed to answer inline query: {}", e);
+            log_request_error("Failed to answer inline query", &e);
         }
 
         return Ok(());
@@ -210,7 +213,7 @@ pub async fn handle_inline_query(
         .cache_time(*INLINE_CACHE_TIME)
         .await
     {
-        log::error!("Failed to answer inline query: {}", e);
+        log_request_error("Failed to answer inline query", &e);
     };
 
     let elapsed = start_time.elapsed();

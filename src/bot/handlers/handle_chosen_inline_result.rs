@@ -1,6 +1,7 @@
 use std::{fs, sync::Arc};
 use tokio::sync::Mutex;
 
+use anyhow::Context as _;
 use rand::RngExt;
 use teloxide::{
     payloads::{EditMessageReplyMarkupInlineSetters, SendAudioSetters},
@@ -12,7 +13,11 @@ use teloxide::{
 };
 
 use crate::{
-    bot::{detect_locale, types::BotWrapped},
+    bot::{
+        detect_locale,
+        errors::{log_request_error, retry_network_with_backoff},
+        types::BotWrapped,
+    },
     cache::{DataStore, cache_check},
     consts::{
         ADVERTISE_CHANCE, ADVERTISE_NAME, ADVERTISE_URL, MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID,
@@ -105,24 +110,27 @@ async fn download_video_inner(
             meta.len() as f64 / 1_048_576.0,
             download_path.display()
         ),
-        Err(e) => log::warn!("Cannot read file metadata for {}: {}", download_path.display(), e),
+        Err(e) => log::warn!(
+            "Cannot read file metadata for {}: {}",
+            download_path.display(),
+            e
+        ),
     }
 
-    let mut send_audio = bot
-        .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
-        .title(&title)
-        .performer(&performer);
+    let tmp_msg = retry_network_with_backoff("Sending audio to trash chat", || {
+        let mut send_audio = bot
+            .send_audio(ChatId(*TRASH_CHAT_ID), InputFile::file(&download_path))
+            .title(&title)
+            .performer(&performer);
 
-    if let Some(path) = &thumbnail_path {
-        send_audio = send_audio.thumbnail(InputFile::file(path));
-    }
-
-    let tmp_msg = match send_audio.await {
-        Ok(msg) => msg,
-        Err(e) => {
-            return Err(anyhow::anyhow!("Failed to get file id for audio: {:#}", e));
+        if let Some(path) = &thumbnail_path {
+            send_audio = send_audio.thumbnail(InputFile::file(path));
         }
-    };
+
+        send_audio
+    })
+    .await
+    .context("Failed to get file ID for audio")?;
 
     let audio = match tmp_msg.audio() {
         Some(audio) => audio,
@@ -134,7 +142,7 @@ async fn download_video_inner(
     log::info!("Got file id for audio: {}", &audio.file.id);
 
     if let Err(e) = bot.delete_message(tmp_msg.chat.id, tmp_msg.id).await {
-        log::error!("Failed to delete temp message: {:?}", e);
+        log_request_error("Failed to delete temporary message", &e);
     }
 
     let result_video = crate::db::models::SavedVideo {
@@ -175,12 +183,15 @@ pub async fn handle_chosen_inline_result(
             "Failed to decode result id: {}",
             chosen_inline_result.result_id
         );
-        bot.edit_message_text_inline(
-            &inline_message_id,
-            t!("chosen.error_decode_id", locale = locale),
-        )
-        .await
-        .ok();
+        if let Err(error) = bot
+            .edit_message_text_inline(
+                &inline_message_id,
+                t!("chosen.error_decode_id", locale = locale),
+            )
+            .await
+        {
+            log_request_error("Failed to report invalid inline result ID", &error);
+        }
 
         return Ok(());
     };
@@ -198,16 +209,19 @@ pub async fn handle_chosen_inline_result(
                 .map(|v| *v)
                 .unwrap_or(0);
             if count >= *MAX_USER_PARALLEL_DOWNLOADS as i32 {
-                bot.edit_message_text_inline(
-                    &inline_message_id,
-                    t!(
-                        "chosen.error_rate_limit",
-                        locale = locale,
-                        max_downloads = (*MAX_USER_PARALLEL_DOWNLOADS).to_string()
-                    ),
-                )
-                .await
-                .ok();
+                if let Err(error) = bot
+                    .edit_message_text_inline(
+                        &inline_message_id,
+                        t!(
+                            "chosen.error_rate_limit",
+                            locale = locale,
+                            max_downloads = (*MAX_USER_PARALLEL_DOWNLOADS).to_string()
+                        ),
+                    )
+                    .await
+                {
+                    log_request_error("Failed to report download rate limit", &error);
+                }
                 return Ok(());
             }
 
@@ -251,9 +265,12 @@ pub async fn handle_chosen_inline_result(
                         );
                     }
 
-                    bot.edit_message_text_inline(&inline_message_id, error_message)
+                    if let Err(error) = bot
+                        .edit_message_text_inline(&inline_message_id, error_message)
                         .await
-                        .ok();
+                    {
+                        log_request_error("Failed to report download error", &error);
+                    }
                     return Err(err);
                 }
             }
@@ -268,13 +285,16 @@ pub async fn handle_chosen_inline_result(
     )
     .to_string();
 
-    if let Ok(me) = bot.get_me().await {
-        text += t!(
-            "chosen.footer",
-            locale = locale,
-            bot_username = me.username()
-        )
-        .as_ref();
+    match bot.get_me().await {
+        Ok(me) => {
+            text += t!(
+                "chosen.footer",
+                locale = locale,
+                bot_username = me.username()
+            )
+            .as_ref();
+        }
+        Err(error) => log_request_error("Failed to get bot information", &error),
     }
 
     let mut input_media_audio =
@@ -294,7 +314,7 @@ pub async fn handle_chosen_inline_result(
         .edit_message_media_inline(&inline_message_id, InputMedia::Audio(input_media_audio))
         .await
     {
-        log::error!("Failed to edit message media inline: {:?}", e);
+        log_request_error("Failed to edit inline message media", &e);
     } else {
         log::info!("Edited message media inline successfully");
     };
@@ -304,7 +324,7 @@ pub async fn handle_chosen_inline_result(
         .reply_markup(get_keyboard(&video_id)?)
         .await
     {
-        log::error!("Failed to edit message reply markup: {:?}", e);
+        log_request_error("Failed to edit inline message reply markup", &e);
     } else {
         log::info!("Edited message reply markup successfully");
     };

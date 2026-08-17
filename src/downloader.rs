@@ -192,7 +192,7 @@ impl Downloader {
     }
 
     fn retry_delay_before_attempt(attempt: usize) -> Duration {
-        Duration::from_secs(1 << (attempt - 2))
+        Duration::from_secs(5 * (1 << (attempt - 2)))
     }
 
     async fn prepare_audio(
@@ -547,11 +547,11 @@ mod tests {
     fn retry_backoff_is_exponential() {
         assert_eq!(
             Downloader::retry_delay_before_attempt(2),
-            Duration::from_secs(1)
+            Duration::from_secs(5)
         );
         assert_eq!(
             Downloader::retry_delay_before_attempt(3),
-            Duration::from_secs(2)
+            Duration::from_secs(10)
         );
     }
 

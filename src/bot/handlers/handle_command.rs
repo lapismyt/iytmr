@@ -9,7 +9,7 @@ use teloxide::{
 };
 
 use crate::{
-    bot::{Command, detect_locale, types::BotWrapped},
+    bot::{Command, detect_locale, errors::log_request_error, types::BotWrapped},
     cache::DataStore,
     db::DatabaseHelper,
 };
@@ -86,7 +86,7 @@ pub async fn handle_command(
                 .reply_markup(try_btn_kb)
                 .await
             {
-                log::warn!("Failed to send start message: {:?}", e);
+                log_request_error("Failed to send start message", &e);
             }
         }
         Command::Help => {
@@ -98,7 +98,7 @@ pub async fn handle_command(
                 .reply_markup(try_btn_kb)
                 .await
             {
-                log::warn!("Failed to send help message: {:?}", e);
+                log_request_error("Failed to send help message", &e);
             }
         }
         Command::Stats => handle_stats(bot, chat.id, user.id, db, data_store, locale).await?,

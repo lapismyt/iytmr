@@ -1,3 +1,4 @@
+pub mod errors;
 mod handlers;
 pub mod types;
 
@@ -61,6 +62,9 @@ pub async fn run(
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![downloader, db, counters])
+        .error_handler(Arc::new(|error: anyhow::Error| async move {
+            errors::log_error("Dispatcher handler failed", &error);
+        }))
         .enable_ctrlc_handler()
         .build()
         .dispatch()
