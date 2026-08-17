@@ -2,17 +2,18 @@ use std::{
     env,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use sha2::{Digest, Sha256};
 use url::Url;
 use yt_dlp::{
+    VideoSelection,
     client::{ProxyConfig, ProxyType},
     error::Error as YtDlpError,
     extractor::{ExtractorConfig, VideoExtractor},
     model::{playlist::Playlist, selector::ThumbnailQuality},
     prelude::*,
-    VideoSelection,
 };
 
 pub struct Downloader {
@@ -22,6 +23,8 @@ pub struct Downloader {
     codec: yt_dlp::model::AudioCodecPreference,
     output_dir: PathBuf,
 }
+
+const AUDIO_PREPARATION_MAX_ATTEMPTS: usize = 3;
 
 impl Downloader {
     pub async fn new<P: AsRef<Path>>(
@@ -97,10 +100,6 @@ impl Downloader {
 
         let audio_filename = format!("{}.mp3", video_id_hash);
 
-        let (audio_path, format_id) = self
-            .download_audio_with_fallback(&video, &audio_filename)
-            .await?;
-
         // Handle thumbnail
         let thumbnail_filename = format!("{}.jpg", video_id_hash);
         let thumbnail_path = match self
@@ -132,33 +131,21 @@ impl Downloader {
             None
         };
 
-        // Add metadata manually via ffmpeg
-        if let Err(e) = self
-            .add_metadata_manual(&audio_path, &video, cropped_thumbnail_path.as_deref())
+        let (audio_path, _) = match self
+            .prepare_audio_with_retries(&video, &audio_filename, cropped_thumbnail_path.as_deref())
             .await
         {
-            log::error!("Failed to add metadata to {}: {}", audio_path.display(), e);
-        }
-
-        // Verify integrity before returning — never return a corrupt file
-        if let Err(e) = self
-            .verify_audio_integrity(&audio_path, video.duration.map(|d| d as f64))
-            .await
-        {
-            let _ = tokio::fs::remove_file(&audio_path).await;
-            // Invalidate yt-dlp file cache so retry downloads fresh
-            self.client
-                .invalidate_download_cache(&video_id, &format_id)
-                .await;
-            if let Some(ref thumb) = cropped_thumbnail_path {
-                let _ = tokio::fs::remove_file(thumb).await;
+            Ok(result) => result,
+            Err(err) => {
+                if let Some(path) = &thumbnail_path {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
+                if let Some(path) = &cropped_thumbnail_path {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
+                return Err(err);
             }
-            return Err(anyhow::anyhow!(
-                "Audio integrity check failed for {}: {}",
-                video_id,
-                e
-            ));
-        }
+        };
 
         // Clean up original thumbnail file if it exists
         if let Some(path) = thumbnail_path {
@@ -166,6 +153,131 @@ impl Downloader {
         }
 
         Ok((video, audio_path, cropped_thumbnail_path))
+    }
+
+    async fn prepare_audio_with_retries(
+        &self,
+        video: &Video,
+        audio_filename: &str,
+        thumbnail_path: Option<&Path>,
+    ) -> anyhow::Result<(PathBuf, String)> {
+        let mut last_error = None;
+
+        for attempt in 1..=AUDIO_PREPARATION_MAX_ATTEMPTS {
+            if attempt > 1 {
+                tokio::time::sleep(Self::retry_delay_before_attempt(attempt)).await;
+                self.cleanup_audio_artifacts(audio_filename).await;
+            }
+
+            match self
+                .prepare_audio(video, audio_filename, thumbnail_path)
+                .await
+            {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    log::warn!(
+                        "Audio preparation attempt {}/{} failed for {}: {:#}",
+                        attempt,
+                        AUDIO_PREPARATION_MAX_ATTEMPTS,
+                        video.id,
+                        err
+                    );
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        self.cleanup_audio_artifacts(audio_filename).await;
+        Err(last_error.expect("audio preparation attempts must produce an error"))
+    }
+
+    fn retry_delay_before_attempt(attempt: usize) -> Duration {
+        Duration::from_secs(1 << (attempt - 2))
+    }
+
+    async fn prepare_audio(
+        &self,
+        video: &Video,
+        audio_filename: &str,
+        thumbnail_path: Option<&Path>,
+    ) -> anyhow::Result<(PathBuf, String)> {
+        let (audio_path, format_id) = self
+            .download_audio_with_fallback(video, audio_filename)
+            .await?;
+
+        self.add_metadata_manual(&audio_path, video, thumbnail_path)
+            .await?;
+
+        if let Err(err) = self
+            .verify_audio_integrity(&audio_path, video.duration.map(|duration| duration as f64))
+            .await
+        {
+            let _ = tokio::fs::remove_file(&audio_path).await;
+            self.client
+                .invalidate_download_cache(&video.id, &format_id)
+                .await;
+            return Err(anyhow::anyhow!(
+                "Audio integrity check failed for {}: {}",
+                video.id,
+                err
+            ));
+        }
+
+        Ok((audio_path, format_id))
+    }
+
+    async fn cleanup_audio_artifacts(&self, audio_filename: &str) {
+        let audio_stem = Path::new(audio_filename)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(audio_filename);
+        let temp_audio_filename = format!("{audio_stem}.temp.mp3");
+        let fallback_prefix = format!("{audio_stem}.fallback.");
+        let mut entries = match tokio::fs::read_dir(&self.output_dir).await {
+            Ok(entries) => entries,
+            Err(err) => {
+                log::warn!(
+                    "Failed to inspect audio artifacts for {}: {}",
+                    audio_filename,
+                    err
+                );
+                return;
+            }
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+            if !Self::is_audio_artifact_filename(
+                file_name,
+                audio_filename,
+                &temp_audio_filename,
+                &fallback_prefix,
+            ) {
+                continue;
+            }
+
+            if let Err(err) = tokio::fs::remove_file(entry.path()).await {
+                log::warn!(
+                    "Failed to remove partial audio artifact {}: {}",
+                    entry.path().display(),
+                    err
+                );
+            }
+        }
+    }
+
+    fn is_audio_artifact_filename(
+        file_name: &str,
+        audio_filename: &str,
+        temp_audio_filename: &str,
+        fallback_prefix: &str,
+    ) -> bool {
+        file_name == audio_filename
+            || file_name == temp_audio_filename
+            || file_name.starts_with(fallback_prefix)
     }
 
     async fn download_audio_with_fallback(
@@ -423,5 +535,55 @@ impl Downloader {
             yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
         extractor.with_arg("--force-ipv4".to_string());
         Ok(extractor.fetch_video(url).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Downloader;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_backoff_is_exponential() {
+        assert_eq!(
+            Downloader::retry_delay_before_attempt(2),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            Downloader::retry_delay_before_attempt(3),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn cleanup_targets_only_audio_artifacts_for_the_video() {
+        let audio_filename = "video-hash.mp3";
+        let temp_audio_filename = "video-hash.temp.mp3";
+        let fallback_prefix = "video-hash.fallback.";
+
+        assert!(Downloader::is_audio_artifact_filename(
+            "video-hash.mp3",
+            audio_filename,
+            temp_audio_filename,
+            fallback_prefix,
+        ));
+        assert!(Downloader::is_audio_artifact_filename(
+            "video-hash.temp.mp3",
+            audio_filename,
+            temp_audio_filename,
+            fallback_prefix,
+        ));
+        assert!(Downloader::is_audio_artifact_filename(
+            "video-hash.fallback.webm",
+            audio_filename,
+            temp_audio_filename,
+            fallback_prefix,
+        ));
+        assert!(!Downloader::is_audio_artifact_filename(
+            "other-hash.mp3",
+            audio_filename,
+            temp_audio_filename,
+            fallback_prefix,
+        ));
     }
 }

@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, sync::Arc};
 use tokio::sync::Mutex;
 
 use rand::RngExt;
@@ -72,31 +72,7 @@ pub async fn download_video(
     video_id: &str,
     data_store: &mut DataStore,
 ) -> anyhow::Result<SavedVideo> {
-    let max_retries = 3u8;
-    let mut last_err = None;
-
-    for attempt in 1..=max_retries {
-        if attempt > 1 {
-            data_store.file_id_cache.remove(video_id);
-        }
-
-        match download_video_inner(bot, downloader.clone(), video_id, data_store).await {
-            Ok(video) => return Ok(video),
-            Err(e) => {
-                log::warn!(
-                    "Download attempt {}/{} failed for {}: {:#}",
-                    attempt,
-                    max_retries,
-                    video_id,
-                    e
-                );
-                last_err = Some(e);
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-    }
-
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("All {} download attempts failed for {}", max_retries, video_id)))
+    download_video_inner(bot, downloader, video_id, data_store).await
 }
 
 async fn download_video_inner(
