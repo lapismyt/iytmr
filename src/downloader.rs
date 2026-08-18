@@ -24,7 +24,7 @@ pub struct Downloader {
     output_dir: PathBuf,
 }
 
-const AUDIO_PREPARATION_MAX_ATTEMPTS: usize = 3;
+const AUDIO_PREPARATION_MAX_ATTEMPTS: usize = 10;
 
 impl Downloader {
     pub async fn new<P: AsRef<Path>>(

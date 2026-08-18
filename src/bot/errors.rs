@@ -6,7 +6,18 @@ use std::{
 use anyhow::Error;
 use teloxide::RequestError;
 
-const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(10)];
+const NETWORK_MAX_ATTEMPTS: usize = 10;
+const RETRY_DELAYS: [Duration; NETWORK_MAX_ATTEMPTS - 1] = [
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
+    Duration::from_secs(40),
+    Duration::from_secs(80),
+    Duration::from_secs(160),
+    Duration::from_secs(320),
+    Duration::from_secs(640),
+    Duration::from_secs(1280),
+];
 
 pub(crate) fn format_request_error(error: &RequestError) -> String {
     match error {
@@ -76,8 +87,9 @@ where
             Ok(value) => return Ok(value),
             Err(error @ RequestError::Network(_)) => {
                 log::warn!(
-                    "{operation_name} failed on attempt {}/3: {}; retrying in {} seconds",
+                    "{operation_name} failed on attempt {}/{}: {}; retrying in {} seconds",
                     retry_index + 1,
+                    NETWORK_MAX_ATTEMPTS,
                     format_request_error(&error),
                     delay.as_secs(),
                 );
@@ -89,7 +101,10 @@ where
 
     let result = operation().into_future().await;
     if let Err(error) = &result {
-        log_request_error(&format!("{operation_name} failed after 3 attempts"), error);
+        log_request_error(
+            &format!("{operation_name} failed after {NETWORK_MAX_ATTEMPTS} attempts"),
+            error,
+        );
     }
 
     result
@@ -182,10 +197,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retry_network_stops_after_three_network_errors() {
+    async fn retry_network_stops_after_ten_network_errors() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let operation_attempts = attempts.clone();
         let temporary_error = network_error().await;
+        let delays = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_delays = delays.clone();
 
         let result = retry_network(
             "test operation",
@@ -193,12 +210,29 @@ mod tests {
                 operation_attempts.fetch_add(1, Ordering::SeqCst);
                 ready::<Result<(), RequestError>>(Err(temporary_error.clone()))
             },
-            |_| ready(()),
+            move |delay| {
+                recorded_delays.lock().unwrap().push(delay);
+                ready(())
+            },
         )
         .await;
 
         assert!(matches!(result, Err(RequestError::Network(_))));
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(attempts.load(Ordering::SeqCst), 10);
+        assert_eq!(
+            *delays.lock().unwrap(),
+            vec![
+                Duration::from_secs(5),
+                Duration::from_secs(10),
+                Duration::from_secs(20),
+                Duration::from_secs(40),
+                Duration::from_secs(80),
+                Duration::from_secs(160),
+                Duration::from_secs(320),
+                Duration::from_secs(640),
+                Duration::from_secs(1280),
+            ]
+        );
     }
 
     #[tokio::test]
