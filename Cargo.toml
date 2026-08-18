@@ -1,6 +1,6 @@
 [package]
 name = "iytmr"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2024"
 
 [dependencies]
@@ -20,7 +20,7 @@ rmp = "0.8"
 rmp-serde = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
-teloxide = { version = "0.17", features = ["full"] }
+teloxide = { version = "0.17", features = ["ctrlc_handler", "macros", "tracing"] }
 tokio = { version = "1.50", features = ["full"] }
 url = "2.5"
 walkdir = "2.5"
