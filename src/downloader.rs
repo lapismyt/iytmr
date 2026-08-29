@@ -84,7 +84,7 @@ impl Downloader {
         title
             .to_lowercase()
             .chars()
-            .filter(|c| c.is_ascii_alphabetic() || *c == ' ')
+            .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
             .map(|c| if c == ' ' { '_' } else { c })
             .collect()
     }
