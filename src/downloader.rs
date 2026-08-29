@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use sha2::{Digest, Sha256};
+
 use url::Url;
 use yt_dlp::{
     VideoSelection,
@@ -80,10 +80,13 @@ impl Downloader {
         })
     }
 
-    fn sha256_hash(video_id: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(video_id);
-        format!("{:x}", hasher.finalize())
+    fn sanitize_title(title: &str) -> String {
+        title
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic() || *c == ' ')
+            .map(|c| if c == ' ' { '_' } else { c })
+            .collect()
     }
 
     pub async fn download<U: Into<String>>(
@@ -96,12 +99,11 @@ impl Downloader {
         let video = extractor.fetch_video(&url.into()).await?;
 
         let video_id = video.id.clone();
-        let video_id_hash = Downloader::sha256_hash(&video_id);
-
-        let audio_filename = format!("{}.mp3", video_id_hash);
+        let sanitized_title = Downloader::sanitize_title(&video.title);
+        let audio_filename = format!("{}_{}.mp3", sanitized_title, video_id);
 
         // Handle thumbnail
-        let thumbnail_filename = format!("{}.jpg", video_id_hash);
+        let thumbnail_filename = format!("{}.jpg", video_id);
         let thumbnail_path = match self
             .client
             .download_thumbnail(
