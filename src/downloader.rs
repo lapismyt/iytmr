@@ -205,6 +205,8 @@ impl Downloader {
             .download_audio_with_fallback(video, audio_filename)
             .await?;
 
+        self.normalize_audio(&audio_path).await?;
+
         self.add_metadata_manual(&audio_path, video, thumbnail_path)
             .await?;
 
@@ -457,6 +459,94 @@ impl Downloader {
             }
         }
 
+        Ok(())
+    }
+
+    async fn normalize_audio(&self, audio_path: &Path) -> anyhow::Result<()> {
+        let target_i = "-14.0";
+        let target_tp = "-1.0";
+        let target_lra = "7.0";
+
+        // Pass 1: measure loudness
+        let analyze_output = tokio::process::Command::new(&self.ffmpeg_path)
+            .arg("-i")
+            .arg(audio_path)
+            .args([
+                "-af",
+                "loudnorm=print_format=json",
+                "-f",
+                "null",
+                "-",
+            ])
+            .output()
+            .await?;
+
+        let analyze_stderr = String::from_utf8_lossy(&analyze_output.stderr);
+        let Some(json_start) = analyze_stderr.find('{') else {
+            anyhow::bail!(
+                "Failed to parse loudnorm analysis output for {}",
+                audio_path.display()
+            );
+        };
+        let Some(json_end) = analyze_stderr.rfind('}') else {
+            anyhow::bail!(
+                "Failed to parse loudnorm analysis output for {}",
+                audio_path.display()
+            );
+        };
+        let json_str = &analyze_stderr[json_start..=json_end];
+
+        let parsed: serde_json::Value = serde_json::from_str(json_str)?;
+        let input_i = parsed["input_i"]
+            .as_str()
+            .unwrap_or("-24.0");
+        let input_tp = parsed["input_tp"]
+            .as_str()
+            .unwrap_or("-1.0");
+        let input_lra = parsed["input_lra"]
+            .as_str()
+            .unwrap_or("7.0");
+        let input_thresh = parsed["input_thresh"]
+            .as_str()
+            .unwrap_or("-34.0");
+
+        log::info!(
+            "Loudnorm analysis for {}: I={} TP={} LRA={} thresh={}",
+            audio_path.display(),
+            input_i,
+            input_tp,
+            input_lra,
+            input_thresh,
+        );
+
+        // Pass 2: apply normalization
+        let temp_path = audio_path.with_extension("norm.mp3");
+        let status = tokio::process::Command::new(&self.ffmpeg_path)
+            .arg("-i")
+            .arg(audio_path)
+            .args([
+                "-af",
+                &format!(
+                    "loudnorm=I={}:TP={}:LRA={}:measured_I={}:measured_TP={}:measured_LRA={}:measured_thresh={}:linear=true",
+                    target_i, target_tp, target_lra, input_i, input_tp, input_lra, input_thresh,
+                ),
+                "-c:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                "-y",
+            ])
+            .arg(&temp_path)
+            .output()
+            .await?;
+
+        if !status.status.success() {
+            let error = String::from_utf8_lossy(&status.stderr);
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            anyhow::bail!("ffmpeg loudnorm failed for {}: {}", audio_path.display(), error);
+        }
+
+        tokio::fs::rename(&temp_path, audio_path).await?;
         Ok(())
     }
 
