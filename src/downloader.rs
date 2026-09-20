@@ -217,6 +217,14 @@ impl Downloader {
             .download_audio_with_fallback(video, audio_filename)
             .await?;
 
+        let metadata = tokio::fs::metadata(&audio_path).await?;
+        if metadata.len() == 0 {
+            anyhow::bail!(
+                "Audio file is empty after download: {}",
+                audio_path.display()
+            );
+        }
+
         self.normalize_audio(&audio_path).await?;
 
         self.add_metadata_manual(&audio_path, video, thumbnail_path)
@@ -495,12 +503,22 @@ impl Downloader {
 
         let analyze_stderr = String::from_utf8_lossy(&analyze_output.stderr);
         let Some(json_start) = analyze_stderr.find('{') else {
+            log::error!(
+                "ffmpeg loudnorm stderr for {}: {}",
+                audio_path.display(),
+                &analyze_stderr[..analyze_stderr.len().min(500)]
+            );
             anyhow::bail!(
                 "Failed to parse loudnorm analysis output for {}",
                 audio_path.display()
             );
         };
         let Some(json_end) = analyze_stderr.rfind('}') else {
+            log::error!(
+                "ffmpeg loudnorm stderr for {} (no closing brace): {}",
+                audio_path.display(),
+                &analyze_stderr[..analyze_stderr.len().min(500)]
+            );
             anyhow::bail!(
                 "Failed to parse loudnorm analysis output for {}",
                 audio_path.display()
