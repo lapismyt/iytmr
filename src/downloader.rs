@@ -103,6 +103,9 @@ impl Downloader {
         let mut extractor =
             yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
         extractor.with_arg("--force-ipv4".to_string());
+        if let Some(ip) = crate::consts::SEND_THROUGH.as_ref() {
+            extractor.with_arg(format!("--source-address={}", ip));
+        }
         let video = extractor.fetch_video(&url.into()).await?;
 
         let video_id = video.id.clone();
@@ -626,6 +629,9 @@ impl Downloader {
         let mut extractor =
             yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
         extractor.with_arg("--force-ipv4".to_string());
+        if let Some(ip) = crate::consts::SEND_THROUGH.as_ref() {
+            extractor.with_arg(format!("--source-address={}", ip));
+        }
         Ok(extractor.search(query, max_results).await?)
     }
 
@@ -633,6 +639,9 @@ impl Downloader {
         let mut extractor =
             yt_dlp::extractor::Youtube::new(self.client.libraries().youtube.clone());
         extractor.with_arg("--force-ipv4".to_string());
+        if let Some(ip) = crate::consts::SEND_THROUGH.as_ref() {
+            extractor.with_arg(format!("--source-address={}", ip));
+        }
         Ok(extractor.fetch_video(url).await?)
     }
 }
