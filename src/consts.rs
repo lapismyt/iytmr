@@ -140,3 +140,20 @@ pub static ADVERTISE_CHANCE: LazyLock<u8> = LazyLock::new(|| {
     log::warn!("ANNOUNCE_CHANCE is not a valid number, defaulting to 0");
     0
 });
+
+pub static SEND_THROUGH: LazyLock<Option<std::net::IpAddr>> = LazyLock::new(|| {
+    if let Ok(ip_str) = std::env::var("SEND_THROUGH") {
+        match ip_str.parse::<std::net::IpAddr>() {
+            Ok(ip) => {
+                log::info!("SEND_THROUGH set to {}", ip);
+                Some(ip)
+            }
+            Err(_) => {
+                log::warn!("SEND_THROUGH is not a valid IP address");
+                None
+            }
+        }
+    } else {
+        None
+    }
+});

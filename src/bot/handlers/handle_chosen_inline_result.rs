@@ -40,7 +40,7 @@ fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> 
 fn get_keyboard(video_id: &str) -> anyhow::Result<InlineKeyboardMarkup> {
     let youtube_button = InlineKeyboardButton::new(
         "YouTube",
-        InlineKeyboardButtonKind::Url(reqwest::Url::parse(
+        InlineKeyboardButtonKind::Url(url::Url::parse(
             format!("https://www.youtube.com/watch?v={}", video_id).as_str(),
         )?),
     );
@@ -66,7 +66,7 @@ fn get_keyboard(video_id: &str) -> anyhow::Result<InlineKeyboardMarkup> {
         [youtube_button],
         [InlineKeyboardButton::new(
             adv_name,
-            InlineKeyboardButtonKind::Url(reqwest::Url::parse(adv_url.as_str())?),
+            InlineKeyboardButtonKind::Url(url::Url::parse(adv_url.as_str())?),
         )],
     ]))
 }

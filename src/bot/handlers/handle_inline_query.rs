@@ -89,11 +89,11 @@ fn playlist_entry_to_inline_query_result_article(
     )]]))
     .description(performer);
 
-    if let Ok(thumbnail_url) = reqwest::Url::from_str(&thumbnail_url) {
+    if let Ok(thumbnail_url) = url::Url::from_str(&thumbnail_url) {
         article = article.thumbnail_url(thumbnail_url);
     }
 
-    if let Ok(video_url) = reqwest::Url::from_str(&vid.url) {
+    if let Ok(video_url) = url::Url::from_str(&vid.url) {
         article = article.url(video_url);
     }
 

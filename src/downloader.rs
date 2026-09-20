@@ -71,6 +71,13 @@ impl Downloader {
         let mut downloader = builder.build().await?;
         downloader.add_arg("--force-ipv4");
 
+        if let Some(ip) = crate::consts::SEND_THROUGH.as_ref() {
+            let source_addr = ip.to_string();
+            log::info!("Using source address: {}", source_addr);
+            downloader.add_arg("--source-address");
+            downloader.add_arg(source_addr);
+        }
+
         Ok(Self {
             client: downloader,
             ffmpeg_path,
