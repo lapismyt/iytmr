@@ -1822,7 +1822,7 @@ dependencies = [
 [[package]]
 name = "media-seek"
 version = "0.4.0"
-source = "git+https://github.com/lapismyt/yt-dlp#18a79b4efabbd7f85798e0df69494c0ae83c1f48"
+source = "git+https://github.com/lapismyt/yt-dlp#43c8c3c2d25ea74728067de848819243ed60425b"
 dependencies = [
  "futures-util",
  "thiserror",
@@ -3253,7 +3253,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -4043,7 +4043,7 @@ dependencies = [
 [[package]]
 name = "yt-dlp"
 version = "2.7.3"
-source = "git+https://github.com/lapismyt/yt-dlp#18a79b4efabbd7f85798e0df69494c0ae83c1f48"
+source = "git+https://github.com/lapismyt/yt-dlp#43c8c3c2d25ea74728067de848819243ed60425b"
 dependencies = [
  "async-trait",
  "cfg-if",

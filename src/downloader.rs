@@ -46,6 +46,15 @@ impl Downloader {
         .await?
         .with_cache_config(cache_config);
 
+        // YouTube signs the streaming URLs with the requesting IP, so every request
+        // (both the yt-dlp binary and the library's own HTTP client) has to leave
+        // from the same address. The binary gets `--source-address` on the extractors
+        // below, the native downloader is bound here.
+        if let Some(ip) = *crate::consts::SEND_THROUGH {
+            log::info!("Binding native downloads to source address: {}", ip);
+            builder = builder.with_source_address(ip);
+        }
+
         if let Ok(proxy_url_str) = env::var("YT_DLP_PROXY") {
             let proxy_url = Url::from_str(&proxy_url_str)?;
 
@@ -68,15 +77,10 @@ impl Downloader {
             }
         }
 
-        let mut downloader = builder.build().await?;
-        downloader.add_arg("--force-ipv4");
-
-        if let Some(ip) = crate::consts::SEND_THROUGH.as_ref() {
-            let source_addr = ip.to_string();
-            log::info!("Using source address: {}", source_addr);
-            downloader.add_arg("--source-address");
-            downloader.add_arg(source_addr);
-        }
+        // NOTE: yt-dlp CLI arguments (`--source-address`, `--force-ipv4`) are passed to
+        // the extractors below — the built-in downloader never sees `Downloader::args`,
+        // it is bound through `DownloaderBuilder::with_source_address` instead.
+        let downloader = builder.build().await?;
 
         Ok(Self {
             client: downloader,
