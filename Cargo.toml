@@ -25,7 +25,10 @@ teloxide = { version = "0.17", features = ["ctrlc_handler", "macros", "tracing"]
 tokio = { version = "1.50", features = ["full"] }
 url = "2.5"
 walkdir = "2.5"
-yt-dlp = { version = "2.7.2", features = ["hickory-dns", "cache-memory", "cache-redb", "rustls"] }
+# Only the persistent (redb) download cache tier is enabled: the in-memory tier records
+# the output file's own path as the cached path, so its hits either truncate the file to
+# zero bytes (same-path copy) or fail with ENOENT once the file is removed between retries.
+yt-dlp = { version = "2.7.2", default-features = false, features = ["hickory-dns", "cache-redb", "rustls"] }
 
 # fix use of yanked lofty version
 [patch.crates-io]
