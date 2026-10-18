@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-
+use anyhow::Context as _;
 use url::Url;
 use yt_dlp::{
     VideoSelection,
@@ -147,7 +147,7 @@ impl Downloader {
             None
         };
 
-        let (audio_path, _) = match self
+        let audio_path = match self
             .prepare_audio_with_retries(&video, &audio_filename, cropped_thumbnail_path.as_deref())
             .await
         {
@@ -176,13 +176,13 @@ impl Downloader {
         video: &Video,
         audio_filename: &str,
         thumbnail_path: Option<&Path>,
-    ) -> anyhow::Result<(PathBuf, String)> {
+    ) -> anyhow::Result<PathBuf> {
         let mut last_error = None;
 
         for attempt in 1..=AUDIO_PREPARATION_MAX_ATTEMPTS {
             if attempt > 1 {
                 tokio::time::sleep(Self::retry_delay_before_attempt(attempt)).await;
-                self.cleanup_audio_artifacts(audio_filename).await;
+                Self::cleanup_audio_artifacts(&self.output_dir, audio_filename).await;
             }
 
             match self
@@ -203,7 +203,7 @@ impl Downloader {
             }
         }
 
-        self.cleanup_audio_artifacts(audio_filename).await;
+        Self::cleanup_audio_artifacts(&self.output_dir, audio_filename).await;
         Err(last_error.expect("audio preparation attempts must produce an error"))
     }
 
@@ -216,17 +216,25 @@ impl Downloader {
         video: &Video,
         audio_filename: &str,
         thumbnail_path: Option<&Path>,
-    ) -> anyhow::Result<(PathBuf, String)> {
-        let (audio_path, format_id) = self
-            .download_audio_with_fallback(video, audio_filename)
-            .await?;
+    ) -> anyhow::Result<PathBuf> {
+        let mut attempted_format_id = None;
+        let (audio_path, format_id) = match self
+            .download_audio_with_fallback(video, audio_filename, &mut attempted_format_id)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                // A failed download may have left a stale cache entry pointing at a file
+                // that no longer exists; drop it so the retry downloads from scratch.
+                self.drop_cached_download(video, attempted_format_id).await;
+                return Err(err);
+            }
+        };
 
-        let metadata = tokio::fs::metadata(&audio_path).await?;
-        if metadata.len() == 0 {
-            anyhow::bail!(
-                "Audio file is empty after download: {}",
-                audio_path.display()
-            );
+        if let Err(err) = Self::ensure_non_empty_audio(&audio_path).await {
+            // The downloaded file is unusable, so its cache entry must not be reused.
+            self.drop_cached_download(video, Some(format_id)).await;
+            return Err(err);
         }
 
         self.normalize_audio(&audio_path).await?;
@@ -239,9 +247,7 @@ impl Downloader {
             .await
         {
             let _ = tokio::fs::remove_file(&audio_path).await;
-            self.client
-                .invalidate_download_cache(&video.id, &format_id)
-                .await;
+            self.drop_cached_download(video, Some(format_id)).await;
             return Err(anyhow::anyhow!(
                 "Audio integrity check failed for {}: {}",
                 video.id,
@@ -249,17 +255,60 @@ impl Downloader {
             ));
         }
 
-        Ok((audio_path, format_id))
+        Ok(audio_path)
     }
 
-    async fn cleanup_audio_artifacts(&self, audio_filename: &str) {
+    /// Removes the yt-dlp download cache entry of an attempt that must not be reused.
+    ///
+    /// Retries delete the output file before preparing the audio again; without dropping
+    /// the cache entry, a cache hit would point at that missing (or already corrupt) file
+    /// and fail with a missing-file IO error instead of downloading the audio again.
+    async fn drop_cached_download(&self, video: &Video, format_id: Option<String>) {
+        let Some(format_id) = format_id else {
+            return;
+        };
+
+        log::debug!(
+            "Dropping cached download of format {} for {}",
+            format_id,
+            video.id
+        );
+
+        self.client
+            .invalidate_download_cache(&video.id, &format_id)
+            .await;
+    }
+
+    async fn ensure_non_empty_audio(audio_path: &Path) -> anyhow::Result<()> {
+        let metadata = tokio::fs::metadata(audio_path).await.with_context(|| {
+            format!(
+                "Failed to inspect downloaded audio {}",
+                audio_path.display()
+            )
+        })?;
+
+        if metadata.len() == 0 {
+            anyhow::bail!(
+                "Audio file is empty after download: {}",
+                audio_path.display()
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn cleanup_audio_artifacts(output_dir: &Path, audio_filename: &str) {
         let audio_stem = Path::new(audio_filename)
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or(audio_filename);
-        let temp_audio_filename = format!("{audio_stem}.temp.mp3");
+        let artifact_names = [
+            audio_filename.to_string(),
+            format!("{audio_stem}.temp.mp3"),
+            format!("{audio_stem}.norm.mp3"),
+        ];
         let fallback_prefix = format!("{audio_stem}.fallback.");
-        let mut entries = match tokio::fs::read_dir(&self.output_dir).await {
+        let mut entries = match tokio::fs::read_dir(output_dir).await {
             Ok(entries) => entries,
             Err(err) => {
                 log::warn!(
@@ -276,12 +325,7 @@ impl Downloader {
             let Some(file_name) = file_name.to_str() else {
                 continue;
             };
-            if !Self::is_audio_artifact_filename(
-                file_name,
-                audio_filename,
-                &temp_audio_filename,
-                &fallback_prefix,
-            ) {
+            if !Self::is_audio_artifact_filename(file_name, &artifact_names, &fallback_prefix) {
                 continue;
             }
 
@@ -297,12 +341,12 @@ impl Downloader {
 
     fn is_audio_artifact_filename(
         file_name: &str,
-        audio_filename: &str,
-        temp_audio_filename: &str,
+        artifact_names: &[String],
         fallback_prefix: &str,
     ) -> bool {
-        file_name == audio_filename
-            || file_name == temp_audio_filename
+        artifact_names
+            .iter()
+            .any(|artifact_name| artifact_name == file_name)
             || file_name.starts_with(fallback_prefix)
     }
 
@@ -310,12 +354,14 @@ impl Downloader {
         &self,
         video: &Video,
         audio_filename: &str,
+        format_id_out: &mut Option<String>,
     ) -> anyhow::Result<(PathBuf, String)> {
         let audio_path = self.output_dir.join(audio_filename);
 
         // Try to select and download a standalone audio format
         if let Some(format) = video.select_audio_format(self.quality, self.codec.clone()) {
             let format_id = format.format_id.clone();
+            *format_id_out = Some(format_id.clone());
             match self
                 .client
                 .download_format_to_path(format, &audio_path)
@@ -340,6 +386,7 @@ impl Downloader {
         );
         let combined_format = video.best_audio_video_format()?;
         let format_id = combined_format.format_id.clone();
+        *format_id_out = Some(format_id.clone());
         let path = self
             .download_muxed_video_and_extract_audio(video, audio_filename, combined_format)
             .await?;
@@ -495,13 +542,7 @@ impl Downloader {
         let analyze_output = tokio::process::Command::new(&self.ffmpeg_path)
             .arg("-i")
             .arg(audio_path)
-            .args([
-                "-af",
-                "loudnorm=print_format=json",
-                "-f",
-                "null",
-                "-",
-            ])
+            .args(["-af", "loudnorm=print_format=json", "-f", "null", "-"])
             .output()
             .await?;
 
@@ -531,18 +572,10 @@ impl Downloader {
         let json_str = &analyze_stderr[json_start..=json_end];
 
         let parsed: serde_json::Value = serde_json::from_str(json_str)?;
-        let input_i = parsed["input_i"]
-            .as_str()
-            .unwrap_or("-24.0");
-        let input_tp = parsed["input_tp"]
-            .as_str()
-            .unwrap_or("-1.0");
-        let input_lra = parsed["input_lra"]
-            .as_str()
-            .unwrap_or("7.0");
-        let input_thresh = parsed["input_thresh"]
-            .as_str()
-            .unwrap_or("-34.0");
+        let input_i = parsed["input_i"].as_str().unwrap_or("-24.0");
+        let input_tp = parsed["input_tp"].as_str().unwrap_or("-1.0");
+        let input_lra = parsed["input_lra"].as_str().unwrap_or("7.0");
+        let input_thresh = parsed["input_thresh"].as_str().unwrap_or("-34.0");
 
         log::info!(
             "Loudnorm analysis for {}: I={} TP={} LRA={} thresh={}",
@@ -577,7 +610,11 @@ impl Downloader {
         if !status.status.success() {
             let error = String::from_utf8_lossy(&status.stderr);
             let _ = tokio::fs::remove_file(&temp_path).await;
-            anyhow::bail!("ffmpeg loudnorm failed for {}: {}", audio_path.display(), error);
+            anyhow::bail!(
+                "ffmpeg loudnorm failed for {}: {}",
+                audio_path.display(),
+                error
+            );
         }
 
         tokio::fs::rename(&temp_path, audio_path).await?;
@@ -670,8 +707,11 @@ impl Downloader {
 
 #[cfg(test)]
 mod tests {
-    use super::Downloader;
     use std::time::Duration;
+
+    use tempfile::TempDir;
+
+    use super::Downloader;
 
     #[test]
     fn retry_backoff_is_exponential() {
@@ -687,33 +727,113 @@ mod tests {
 
     #[test]
     fn cleanup_targets_only_audio_artifacts_for_the_video() {
-        let audio_filename = "video-hash.mp3";
-        let temp_audio_filename = "video-hash.temp.mp3";
+        let artifact_names = [
+            "video-hash.mp3".to_string(),
+            "video-hash.temp.mp3".to_string(),
+            "video-hash.norm.mp3".to_string(),
+        ];
         let fallback_prefix = "video-hash.fallback.";
 
         assert!(Downloader::is_audio_artifact_filename(
             "video-hash.mp3",
-            audio_filename,
-            temp_audio_filename,
+            &artifact_names,
             fallback_prefix,
         ));
         assert!(Downloader::is_audio_artifact_filename(
             "video-hash.temp.mp3",
-            audio_filename,
-            temp_audio_filename,
+            &artifact_names,
+            fallback_prefix,
+        ));
+        assert!(Downloader::is_audio_artifact_filename(
+            "video-hash.norm.mp3",
+            &artifact_names,
             fallback_prefix,
         ));
         assert!(Downloader::is_audio_artifact_filename(
             "video-hash.fallback.webm",
-            audio_filename,
-            temp_audio_filename,
+            &artifact_names,
             fallback_prefix,
         ));
         assert!(!Downloader::is_audio_artifact_filename(
             "other-hash.mp3",
-            audio_filename,
-            temp_audio_filename,
+            &artifact_names,
             fallback_prefix,
         ));
+    }
+
+    #[tokio::test]
+    async fn cleanup_removes_stale_audio_artifacts() {
+        let output_dir = TempDir::new().expect("temporary directory must be created");
+        let artifacts = [
+            "video-hash.mp3",
+            "video-hash.temp.mp3",
+            "video-hash.norm.mp3",
+            "video-hash.fallback.webm",
+        ];
+        for artifact in artifacts {
+            tokio::fs::write(output_dir.path().join(artifact), b"data")
+                .await
+                .expect("artifact must be written");
+        }
+        let untouched_path = output_dir.path().join("other-hash.mp3");
+        tokio::fs::write(&untouched_path, b"data")
+            .await
+            .expect("artifact must be written");
+
+        Downloader::cleanup_audio_artifacts(output_dir.path(), "video-hash.mp3").await;
+
+        for artifact in artifacts {
+            assert!(
+                !output_dir.path().join(artifact).exists(),
+                "{} must be removed",
+                artifact
+            );
+        }
+        assert!(untouched_path.exists());
+    }
+
+    #[tokio::test]
+    async fn ensure_non_empty_audio_rejects_missing_file() {
+        let output_dir = TempDir::new().expect("temporary directory must be created");
+
+        let err = Downloader::ensure_non_empty_audio(&output_dir.path().join("missing.mp3"))
+            .await
+            .expect_err("missing file must be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("Failed to inspect downloaded audio")
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_non_empty_audio_rejects_empty_download() {
+        let output_dir = TempDir::new().expect("temporary directory must be created");
+        let audio_path = output_dir.path().join("empty.mp3");
+        tokio::fs::write(&audio_path, b"")
+            .await
+            .expect("empty file must be written");
+
+        let err = Downloader::ensure_non_empty_audio(&audio_path)
+            .await
+            .expect_err("empty file must be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("Audio file is empty after download")
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_non_empty_audio_accepts_downloaded_file() {
+        let output_dir = TempDir::new().expect("temporary directory must be created");
+        let audio_path = output_dir.path().join("audio.mp3");
+        tokio::fs::write(&audio_path, b"audio")
+            .await
+            .expect("audio file must be written");
+
+        Downloader::ensure_non_empty_audio(&audio_path)
+            .await
+            .expect("downloaded audio must be accepted");
     }
 }

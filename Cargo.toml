@@ -34,5 +34,8 @@ yt-dlp = { version = "2.7.2", default-features = false, features = ["hickory-dns
 [patch.crates-io]
 yt-dlp = { git = "https://github.com/lapismyt/yt-dlp" }
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 lto = "thin"
