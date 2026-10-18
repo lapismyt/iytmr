@@ -9,11 +9,12 @@ use teloxide::{
         InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText,
         LinkPreviewOptions, Me,
     },
+    utils::html,
 };
 use yt_dlp::model::playlist::PlaylistEntry;
 
 use crate::{
-    bot::{detect_locale, errors::log_request_error, types::BotWrapped},
+    bot::{detect_locale, errors::log_request_error, types::BotWrapped, video_url},
     consts::{
         BLANK_PLACEHOLDER, INLINE_CACHE_TIME, MAX_DURATION, MAX_RESULTS, MIN_DURATION,
         NO_RESULTS_ID, VERSION,
@@ -48,6 +49,14 @@ fn is_youtube_url(query: &str) -> bool {
         || q.starts_with("http://m.youtube.com/")
 }
 
+/// Builds the placeholder shown while the track is downloading, with the track name
+/// linked to its YouTube page.
+fn downloading_message_text(locale: &str, video_id: &str, performer: &str, title: &str) -> String {
+    let track = html::link(&video_url(video_id), &format!("{} — {}", performer, title));
+
+    t!("inline.downloading", locale = locale, track = track).to_string()
+}
+
 fn playlist_entry_to_inline_query_result_article(
     bot: &BotWrapped,
     vid: &PlaylistEntry,
@@ -65,13 +74,12 @@ fn playlist_entry_to_inline_query_result_article(
             false => title.clone(),
         },
         InputMessageContent::Text(InputMessageContentText {
-            message_text: t!(
-                "inline.downloading",
-                locale = locale,
-                performer = performer.as_str(),
-                title = title.as_str()
-            )
-            .to_string(),
+            message_text: downloading_message_text(
+                locale,
+                &vid.id,
+                performer.as_str(),
+                title.as_str(),
+            ),
             parse_mode: Some(bot.parse_mode()),
             entities: None,
             link_preview_options: Some(LinkPreviewOptions {
@@ -220,4 +228,33 @@ pub async fn handle_inline_query(
     log::debug!("Inline query handled in {:?}", elapsed);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::downloading_message_text;
+
+    #[test]
+    fn downloading_message_links_the_track_to_its_youtube_page() {
+        let text = downloading_message_text("en", "dQw4w9WgXcQ", "Performer", "Title");
+
+        assert!(text.contains(
+            "<a href=\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\">Performer — Title</a>"
+        ));
+        assert!(!text.contains("%{"));
+    }
+
+    #[test]
+    fn downloading_message_escapes_track_metadata() {
+        let text = downloading_message_text("en", "video-id", "A&B", "<Title>");
+
+        assert!(text.contains("A&amp;B — &lt;Title&gt;"));
+        assert!(!text.contains("<Title>"));
+    }
+
+    #[test]
+    fn downloading_message_is_translated() {
+        assert!(downloading_message_text("ru", "video-id", "P", "T").contains("Скачивание"));
+        assert!(downloading_message_text("uk", "video-id", "P", "T").contains("Завантаження"));
+    }
 }

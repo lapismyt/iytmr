@@ -20,6 +20,11 @@ pub fn detect_locale(user: &User) -> &str {
     user.language_code.as_deref().unwrap_or("en")
 }
 
+/// Builds the YouTube watch URL of a video.
+pub fn video_url(video_id: &str) -> String {
+    format!("https://www.youtube.com/watch?v={}", video_id)
+}
+
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 enum Command {
@@ -69,4 +74,17 @@ pub async fn run(
         .build()
         .dispatch()
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::video_url;
+
+    #[test]
+    fn video_url_points_to_the_youtube_watch_page() {
+        assert_eq!(
+            video_url("dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+    }
 }
