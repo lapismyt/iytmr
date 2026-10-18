@@ -20,5 +20,6 @@ chosen:
   error_age_restricted: "💥 Ошибка: Это видео 18+, но этому боту всего %{bot_age} лет."
   caption: "<code>%{performer} — %{title}</code>\n"
   footer: "✨ Скачано с @%{bot_username}"
+  source: "источник"
 command:
   try_now: "Попробовать"
