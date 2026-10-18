@@ -7,7 +7,7 @@ help:
 stats:
   title: "<b>Статистика:</b>\n\nВсего пользователей: %{total_users}\nАктивных за месяц: %{monthly_active_users}\nСкачанных файлов: %{downloaded_files}\nКэшированных видео: %{cached_videos}\nВсего скачиваний: %{total_downloads}\nВаши скачивания: %{your_downloads}\nДата регистрации: %{register_date}"
 inline:
-  downloading: '<b>Скачивание "%{track}"...</b>'
+  downloading: '<b>Скачивание «%{track}»...</b>'
   loading: "Загрузка..."
   type_query_hint: "Введите запрос для поиска музыки"
   no_results_title: "Ничего не найдено"
