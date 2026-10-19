@@ -18,7 +18,7 @@ chosen:
   error_rate_limit: "💥 Ошибка: У вас уже %{max_downloads} активных скачиваний. Пожалуйста, подождите."
   error_download: "💥 Ошибка: Не удалось скачать видео: %{error}"
   error_age_restricted: "💥 Ошибка: Это видео 18+, но этому боту всего %{bot_age} лет."
-  caption: "<code>%{performer} — %{title}</code>\n"
+  caption: "%{performer} — %{title}"
   footer: "✨ Скачано с @%{bot_username}"
   source: "источник"
 command:

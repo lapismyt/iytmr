@@ -62,22 +62,19 @@ fn get_keyboard(
     )]]))
 }
 
-/// Builds the caption of a sent track with a link to its YouTube page.
+/// Builds the caption of a sent track: the track name linked to its YouTube page.
+///
+/// `performer` and `title` are passed raw here: `html::link` escapes the whole track
+/// text, so pre-escaping them would double-encode special characters.
 fn get_caption(locale: &str, video_id: &str, performer: &str, title: &str) -> String {
-    let escaped_performer = html::escape(performer);
-    let escaped_title = html::escape(title);
-    let caption = t!(
+    let track = t!(
         "chosen.caption",
         locale = locale,
-        performer = escaped_performer.as_str(),
-        title = escaped_title.as_str()
-    );
-    let source_link = html::link(
-        &video_url(video_id),
-        t!("chosen.source", locale = locale).as_ref(),
+        performer = performer,
+        title = title
     );
 
-    format!("{}{}", caption, source_link)
+    html::link(&video_url(video_id), track.as_ref())
 }
 
 pub async fn download_video(
@@ -397,27 +394,38 @@ mod tests {
     }
 
     #[test]
-    fn caption_links_to_the_source_and_has_no_footer() {
+    fn caption_links_the_track_to_its_youtube_page() {
         let caption = get_caption("en", "dQw4w9WgXcQ", "Performer", "Title");
 
         assert_eq!(
             caption,
-            "<code>Performer — Title</code>\n\
-             <a href=\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\">source</a>"
+            "<a href=\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\">Performer — Title</a>"
         );
+        assert_eq!(caption.matches("<a ").count(), 1);
+        assert!(!caption.contains("source"));
         assert!(!caption.contains("Downloaded with"));
     }
 
     #[test]
-    fn caption_is_translated() {
-        assert!(get_caption("ru", "video-id", "P", "T").contains(">источник</a>"));
-        assert!(get_caption("uk", "video-id", "P", "T").contains(">джерело</a>"));
+    fn caption_links_the_track_in_every_locale() {
+        for locale in ["en", "ru", "uk"] {
+            let caption = get_caption(locale, "video-id", "Performer", "Title");
+
+            assert_eq!(
+                caption,
+                "<a href=\"https://www.youtube.com/watch?v=video-id\">Performer — Title</a>",
+                "locale {locale} must link the track"
+            );
+        }
     }
 
     #[test]
     fn caption_escapes_track_metadata() {
         let caption = get_caption("en", "video-id", "A&B", "<Title>");
 
-        assert!(caption.contains("<code>A&amp;B — &lt;Title&gt;</code>"));
+        assert_eq!(
+            caption,
+            "<a href=\"https://www.youtube.com/watch?v=video-id\">A&amp;B — &lt;Title&gt;</a>"
+        );
     }
 }

@@ -18,7 +18,7 @@ chosen:
   error_rate_limit: "💥 Error: You already have %{max_downloads} active downloads. Please wait."
   error_download: "💥 Error: Failed to download video: %{error}"
   error_age_restricted: "💥 Error: This video is 18+, but this bot is only %{bot_age} years old."
-  caption: "<code>%{performer} — %{title}</code>\n"
+  caption: "%{performer} — %{title}"
   footer: "✨ Downloaded with @%{bot_username}"
   source: "source"
 command:
