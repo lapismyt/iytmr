@@ -10,7 +10,6 @@ use teloxide::{
         ChatId, ChosenInlineResult, FileId, InlineKeyboardButton, InlineKeyboardButtonKind,
         InlineKeyboardMarkup, InputFile, InputMedia, InputMediaAudio,
     },
-    utils::html,
 };
 
 use crate::{
@@ -41,40 +40,36 @@ fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> 
 
 /// Builds the reply markup shown after a track is sent.
 ///
-/// `roll` is the precomputed advert draw in `0..100`; an advertise button is shown only
-/// when it is lower than `advertise_chance`. The keyboard is empty otherwise.
+/// The first row always links to the video. An advertise button is appended as a second
+/// row only when the precomputed advert draw (`roll` in `0..100`) is lower than
+/// `advertise_chance`.
 fn get_keyboard(
+    locale: &str,
+    video_id: &str,
     advertise: Option<(&str, &str)>,
     advertise_chance: u8,
     roll: u8,
 ) -> anyhow::Result<InlineKeyboardMarkup> {
+    let source_button = InlineKeyboardButton::new(
+        t!("chosen.source", locale = locale).as_ref(),
+        InlineKeyboardButtonKind::Url(url::Url::parse(&video_url(video_id))?),
+    );
+
     let Some((advertise_name, advertise_url)) = advertise else {
-        return Ok(InlineKeyboardMarkup::default());
+        return Ok(InlineKeyboardMarkup::new([[source_button]]));
     };
 
     if roll >= advertise_chance {
-        return Ok(InlineKeyboardMarkup::default());
+        return Ok(InlineKeyboardMarkup::new([[source_button]]));
     }
 
-    Ok(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-        advertise_name,
-        InlineKeyboardButtonKind::Url(url::Url::parse(advertise_url)?),
-    )]]))
-}
-
-/// Builds the caption of a sent track: the track name linked to its YouTube page.
-///
-/// `performer` and `title` are passed raw here: `html::link` escapes the whole track
-/// text, so pre-escaping them would double-encode special characters.
-fn get_caption(locale: &str, video_id: &str, performer: &str, title: &str) -> String {
-    let track = t!(
-        "chosen.caption",
-        locale = locale,
-        performer = performer,
-        title = title
-    );
-
-    html::link(&video_url(video_id), track.as_ref())
+    Ok(InlineKeyboardMarkup::new([
+        [source_button],
+        [InlineKeyboardButton::new(
+            advertise_name,
+            InlineKeyboardButtonKind::Url(url::Url::parse(advertise_url)?),
+        )],
+    ]))
 }
 
 pub async fn download_video(
@@ -283,11 +278,8 @@ pub async fn handle_chosen_inline_result(
         }
     };
 
-    let text = get_caption(locale, &video_id, &video.performer, &video.title);
-
     let mut input_media_audio =
         InputMediaAudio::new(InputFile::file_id(FileId::from(video.file_id)))
-            .caption(text)
             .title(video.title)
             .performer(video.performer)
             .duration(video.duration as u16);
@@ -316,7 +308,13 @@ pub async fn handle_chosen_inline_result(
 
     if let Err(e) = bot
         .edit_message_reply_markup_inline(&inline_message_id)
-        .reply_markup(get_keyboard(advertise, *ADVERTISE_CHANCE, advertise_roll)?)
+        .reply_markup(get_keyboard(
+            locale,
+            &video_id,
+            advertise,
+            *ADVERTISE_CHANCE,
+            advertise_roll,
+        )?)
         .await
     {
         log_request_error("Failed to edit inline message reply markup", &e);
@@ -338,7 +336,7 @@ pub async fn handle_chosen_inline_result(
 mod tests {
     use teloxide::types::InlineKeyboardButtonKind;
 
-    use super::{decode_temporary_id, get_caption, get_keyboard};
+    use super::{decode_temporary_id, get_keyboard};
 
     const ADVERTISE: Option<(&str, &str)> = Some(("Ad", "https://example.com/ad"));
 
@@ -357,75 +355,65 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_is_empty_without_advertise() {
-        let keyboard = get_keyboard(None, 100, 0).expect("keyboard must be built");
-
-        assert!(keyboard.inline_keyboard.is_empty());
-    }
-
-    #[test]
-    fn keyboard_is_empty_when_advertise_chance_is_rejected() {
-        let keyboard = get_keyboard(ADVERTISE, 10, 10).expect("keyboard must be built");
-
-        assert!(keyboard.inline_keyboard.is_empty());
-    }
-
-    #[test]
-    fn keyboard_is_empty_when_advertise_chance_is_zero() {
-        let keyboard = get_keyboard(ADVERTISE, 0, 0).expect("keyboard must be built");
-
-        assert!(keyboard.inline_keyboard.is_empty());
-    }
-
-    #[test]
-    fn keyboard_shows_only_the_advertise_button() {
-        let keyboard = get_keyboard(ADVERTISE, 100, 99).expect("keyboard must be built");
+    fn keyboard_links_to_the_video_without_advertise() {
+        let keyboard =
+            get_keyboard("en", "dQw4w9WgXcQ", None, 100, 0).expect("keyboard must be built");
 
         assert_eq!(keyboard.inline_keyboard.len(), 1);
         let button = &keyboard.inline_keyboard[0][0];
-        assert_eq!(button.text, "Ad");
-        assert_eq!(keyboard.inline_keyboard[0].len(), 1);
+        assert_eq!(button.text, "source");
         match &button.kind {
+            InlineKeyboardButtonKind::Url(url) => {
+                assert_eq!(url.as_str(), "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            }
+            kind => panic!("source button must be a URL button, got {kind:?}"),
+        }
+    }
+
+    #[test]
+    fn keyboard_labels_the_source_in_the_user_locale() {
+        let keyboard =
+            get_keyboard("ru", "video-id", None, 100, 0).expect("keyboard must be built");
+
+        assert_eq!(keyboard.inline_keyboard[0][0].text, "источник");
+    }
+
+    #[test]
+    fn keyboard_hides_advertise_when_roll_misses_chance() {
+        let keyboard =
+            get_keyboard("en", "video-id", ADVERTISE, 10, 10).expect("keyboard must be built");
+
+        assert_eq!(keyboard.inline_keyboard.len(), 1);
+    }
+
+    #[test]
+    fn keyboard_hides_advertise_when_chance_is_zero() {
+        let keyboard =
+            get_keyboard("en", "video-id", ADVERTISE, 0, 0).expect("keyboard must be built");
+
+        assert_eq!(keyboard.inline_keyboard.len(), 1);
+    }
+
+    #[test]
+    fn keyboard_appends_advertise_when_rolled_in() {
+        let keyboard =
+            get_keyboard("en", "video-id", ADVERTISE, 100, 99).expect("keyboard must be built");
+
+        assert_eq!(keyboard.inline_keyboard.len(), 2);
+        let source_button = &keyboard.inline_keyboard[0][0];
+        match &source_button.kind {
+            InlineKeyboardButtonKind::Url(url) => {
+                assert_eq!(url.as_str(), "https://www.youtube.com/watch?v=video-id")
+            }
+            kind => panic!("source button must be a URL button, got {kind:?}"),
+        }
+        let advertise_button = &keyboard.inline_keyboard[1][0];
+        assert_eq!(advertise_button.text, "Ad");
+        match &advertise_button.kind {
             InlineKeyboardButtonKind::Url(url) => {
                 assert_eq!(url.as_str(), "https://example.com/ad")
             }
             kind => panic!("advertise button must be a URL button, got {kind:?}"),
         }
-    }
-
-    #[test]
-    fn caption_links_the_track_to_its_youtube_page() {
-        let caption = get_caption("en", "dQw4w9WgXcQ", "Performer", "Title");
-
-        assert_eq!(
-            caption,
-            "<a href=\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\">Performer — Title</a>"
-        );
-        assert_eq!(caption.matches("<a ").count(), 1);
-        assert!(!caption.contains("source"));
-        assert!(!caption.contains("Downloaded with"));
-    }
-
-    #[test]
-    fn caption_links_the_track_in_every_locale() {
-        for locale in ["en", "ru", "uk"] {
-            let caption = get_caption(locale, "video-id", "Performer", "Title");
-
-            assert_eq!(
-                caption,
-                "<a href=\"https://www.youtube.com/watch?v=video-id\">Performer — Title</a>",
-                "locale {locale} must link the track"
-            );
-        }
-    }
-
-    #[test]
-    fn caption_escapes_track_metadata() {
-        let caption = get_caption("en", "video-id", "A&B", "<Title>");
-
-        assert_eq!(
-            caption,
-            "<a href=\"https://www.youtube.com/watch?v=video-id\">A&amp;B — &lt;Title&gt;</a>"
-        );
     }
 }
