@@ -50,21 +50,21 @@ fn get_keyboard(
     advertise_chance: u8,
     roll: u8,
 ) -> anyhow::Result<InlineKeyboardMarkup> {
-    let source_button = InlineKeyboardButton::new(
-        t!("chosen.source", locale = locale).as_ref(),
+    let youtube_button = InlineKeyboardButton::new(
+        t!("chosen.youtube_button", locale = locale).as_ref(),
         InlineKeyboardButtonKind::Url(url::Url::parse(&video_url(video_id))?),
     );
 
     let Some((advertise_name, advertise_url)) = advertise else {
-        return Ok(InlineKeyboardMarkup::new([[source_button]]));
+        return Ok(InlineKeyboardMarkup::new([[youtube_button]]));
     };
 
     if roll >= advertise_chance {
-        return Ok(InlineKeyboardMarkup::new([[source_button]]));
+        return Ok(InlineKeyboardMarkup::new([[youtube_button]]));
     }
 
     Ok(InlineKeyboardMarkup::new([
-        [source_button],
+        [youtube_button],
         [InlineKeyboardButton::new(
             advertise_name,
             InlineKeyboardButtonKind::Url(url::Url::parse(advertise_url)?),
@@ -361,21 +361,26 @@ mod tests {
 
         assert_eq!(keyboard.inline_keyboard.len(), 1);
         let button = &keyboard.inline_keyboard[0][0];
-        assert_eq!(button.text, "source");
+        assert_eq!(button.text, "YouTube");
         match &button.kind {
             InlineKeyboardButtonKind::Url(url) => {
                 assert_eq!(url.as_str(), "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
             }
-            kind => panic!("source button must be a URL button, got {kind:?}"),
+            kind => panic!("YouTube button must be a URL button, got {kind:?}"),
         }
     }
 
     #[test]
-    fn keyboard_labels_the_source_in_the_user_locale() {
-        let keyboard =
-            get_keyboard("ru", "video-id", None, 100, 0).expect("keyboard must be built");
+    fn keyboard_labels_the_button_from_locales() {
+        for locale in ["en", "ru", "uk"] {
+            let keyboard =
+                get_keyboard(locale, "video-id", None, 100, 0).expect("keyboard must be built");
 
-        assert_eq!(keyboard.inline_keyboard[0][0].text, "источник");
+            assert_eq!(
+                keyboard.inline_keyboard[0][0].text, "YouTube",
+                "locale {locale} must label the button"
+            );
+        }
     }
 
     #[test]
@@ -400,12 +405,12 @@ mod tests {
             get_keyboard("en", "video-id", ADVERTISE, 100, 99).expect("keyboard must be built");
 
         assert_eq!(keyboard.inline_keyboard.len(), 2);
-        let source_button = &keyboard.inline_keyboard[0][0];
-        match &source_button.kind {
+        let youtube_button = &keyboard.inline_keyboard[0][0];
+        match &youtube_button.kind {
             InlineKeyboardButtonKind::Url(url) => {
                 assert_eq!(url.as_str(), "https://www.youtube.com/watch?v=video-id")
             }
-            kind => panic!("source button must be a URL button, got {kind:?}"),
+            kind => panic!("YouTube button must be a URL button, got {kind:?}"),
         }
         let advertise_button = &keyboard.inline_keyboard[1][0];
         assert_eq!(advertise_button.text, "Ad");
