@@ -103,17 +103,15 @@ impl DataStore {
     }
 
     pub fn get_file_id(&self, video_id: &str) -> Option<SavedVideo> {
-        self.file_id_cache
-            .get(video_id)
-            .and_then(|entry| {
-                if entry.1.elapsed() < FILE_ID_CACHE_TTL {
-                    Some(entry.0.clone())
-                } else {
-                    drop(entry);
-                    self.file_id_cache.remove(video_id);
-                    None
-                }
-            })
+        self.file_id_cache.get(video_id).and_then(|entry| {
+            if entry.1.elapsed() < FILE_ID_CACHE_TTL {
+                Some(entry.0.clone())
+            } else {
+                drop(entry);
+                self.file_id_cache.remove(video_id);
+                None
+            }
+        })
     }
 
     pub fn save_file_id(&self, video: SavedVideo) {

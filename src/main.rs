@@ -25,7 +25,9 @@ fn build_http_client() -> reqwest::Client {
         builder = builder.local_address(ip);
     }
 
-    builder.build().expect("HTTP client must be built correctly")
+    builder
+        .build()
+        .expect("HTTP client must be built correctly")
 }
 
 #[tokio::main]
