@@ -12,6 +12,10 @@ inline:
   type_query_hint: "Уведіть запит для пошуку музики"
   no_results_title: "Нічого не знайдено"
   no_results_text: "За вашим запитом нічого не знайдено."
+  too_short_title: "Занадто коротке"
+  too_short_text: "Це відео коротше за ліміт %{min_duration}."
+  too_long_title: "Занадто довге"
+  too_long_text: "Це відео довше за ліміт %{max_duration}."
 chosen:
   youtube_button: "YouTube"
   error_decode_id: "Помилка: Не вдалося декодувати ID результату"

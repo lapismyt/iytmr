@@ -26,6 +26,58 @@ pub struct Downloader {
 
 const AUDIO_PREPARATION_MAX_ATTEMPTS: usize = 10;
 
+/// How a video's duration breaks the configured `MIN_DURATION`/`MAX_DURATION` bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurationViolationKind {
+    TooShort,
+    TooLong,
+}
+
+/// Error returned by [`Downloader::download`] when the video does not fit the duration
+/// bounds. Handlers downcast it to show a localized message instead of a generic error.
+#[derive(Debug)]
+pub struct DurationViolation {
+    pub kind: DurationViolationKind,
+    pub duration: f64,
+}
+
+impl std::fmt::Display for DurationViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            DurationViolationKind::TooShort => {
+                write!(f, "video is too short: {:.0}s", self.duration)
+            }
+            DurationViolationKind::TooLong => {
+                write!(f, "video is too long: {:.0}s", self.duration)
+            }
+        }
+    }
+}
+
+impl std::error::Error for DurationViolation {}
+
+/// Returns how `duration` breaks the bounds, if it does.
+///
+/// Missing bounds mean "no limit", and an unknown duration (`None`) is never rejected.
+/// Bounds are inclusive: a video exactly at `min`/`max` is allowed.
+pub fn check_duration(
+    duration: Option<f64>,
+    min: Option<f64>,
+    max: Option<f64>,
+) -> Option<DurationViolationKind> {
+    let duration = duration?;
+
+    if max.is_some_and(|max| duration > max) {
+        return Some(DurationViolationKind::TooLong);
+    }
+
+    if min.is_some_and(|min| duration < min) {
+        return Some(DurationViolationKind::TooShort);
+    }
+
+    None
+}
+
 impl Downloader {
     pub async fn new<P: AsRef<Path>>(
         output_dir: P,
@@ -111,6 +163,24 @@ impl Downloader {
             extractor.with_arg(format!("--source-address={}", ip));
         }
         let video = extractor.fetch_video(&url.into()).await?;
+
+        let duration = video.duration.map(|duration| duration as f64);
+        if let Some(kind) = check_duration(
+            duration,
+            *crate::consts::MIN_DURATION,
+            *crate::consts::MAX_DURATION,
+        ) {
+            log::warn!(
+                "Refusing to download {}: duration {:.0}s violates the configured bounds",
+                video.id,
+                duration.unwrap_or_default()
+            );
+            return Err(DurationViolation {
+                kind,
+                duration: duration.unwrap_or_default(),
+            }
+            .into());
+        }
 
         let video_id = video.id.clone();
         let sanitized_title = Downloader::sanitize_title(&video.title);
@@ -711,7 +781,48 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::Downloader;
+    use super::{Downloader, DurationViolationKind, check_duration};
+
+    #[test]
+    fn duration_within_bounds_is_allowed() {
+        assert_eq!(check_duration(Some(300.0), Some(1.0), Some(600.0)), None);
+    }
+
+    #[test]
+    fn duration_bounds_are_inclusive() {
+        assert_eq!(check_duration(Some(600.0), None, Some(600.0)), None);
+        assert_eq!(check_duration(Some(1.0), Some(1.0), None), None);
+    }
+
+    #[test]
+    fn duration_above_max_is_too_long() {
+        assert_eq!(
+            check_duration(Some(601.0), None, Some(600.0)),
+            Some(DurationViolationKind::TooLong)
+        );
+    }
+
+    #[test]
+    fn duration_below_min_is_too_short() {
+        assert_eq!(
+            check_duration(Some(0.5), Some(1.0), None),
+            Some(DurationViolationKind::TooShort)
+        );
+    }
+
+    #[test]
+    fn unknown_duration_or_missing_bounds_are_never_rejected() {
+        assert_eq!(check_duration(None, Some(1.0), Some(600.0)), None);
+        assert_eq!(check_duration(Some(9999.0), None, None), None);
+    }
+
+    #[test]
+    fn conflicting_bounds_prefer_too_long() {
+        assert_eq!(
+            check_duration(Some(100.0), Some(200.0), Some(50.0)),
+            Some(DurationViolationKind::TooLong)
+        );
+    }
 
     #[test]
     fn retry_backoff_is_exponential() {

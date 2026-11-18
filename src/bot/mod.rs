@@ -25,6 +25,12 @@ pub fn video_url(video_id: &str) -> String {
     format!("https://www.youtube.com/watch?v={}", video_id)
 }
 
+/// Formats a duration limit as `m:ss` for user-facing messages.
+pub fn format_duration(seconds: f64) -> String {
+    let total = seconds.round().max(0.0) as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 enum Command {
@@ -78,7 +84,7 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::video_url;
+    use super::{format_duration, video_url};
 
     #[test]
     fn video_url_points_to_the_youtube_watch_page() {
@@ -86,5 +92,13 @@ mod tests {
             video_url("dQw4w9WgXcQ"),
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         );
+    }
+
+    #[test]
+    fn format_duration_renders_minutes_and_padded_seconds() {
+        assert_eq!(format_duration(600.0), "10:00");
+        assert_eq!(format_duration(90.0), "1:30");
+        assert_eq!(format_duration(5.0), "0:05");
+        assert_eq!(format_duration(0.4), "0:00");
     }
 }

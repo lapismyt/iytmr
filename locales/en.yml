@@ -12,6 +12,10 @@ inline:
   type_query_hint: "Type a query to search for music"
   no_results_title: "No results"
   no_results_text: "No results found for your query."
+  too_short_title: "Too short"
+  too_short_text: "This video is shorter than the %{min_duration} limit."
+  too_long_title: "Too long"
+  too_long_text: "This video is longer than the %{max_duration} limit."
 chosen:
   youtube_button: "YouTube"
   error_decode_id: "Error: Failed to decode result id"

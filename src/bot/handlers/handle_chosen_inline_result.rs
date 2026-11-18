@@ -16,17 +16,44 @@ use crate::{
     bot::{
         detect_locale,
         errors::{log_request_error, retry_network_with_backoff},
+        format_duration,
         types::BotWrapped,
         video_url,
     },
     cache::{DataStore, cache_check},
     consts::{
-        ADVERTISE_CHANCE, ADVERTISE_NAME, ADVERTISE_URL, MAX_USER_PARALLEL_DOWNLOADS, TRASH_CHAT_ID,
+        ADVERTISE_CHANCE, ADVERTISE_NAME, ADVERTISE_URL, MAX_DURATION, MAX_USER_PARALLEL_DOWNLOADS,
+        MIN_DURATION, NO_RESULTS_ID, TOO_LONG_ID, TOO_SHORT_ID, TRASH_CHAT_ID,
     },
     db::{DatabaseHelper, models::SavedVideo},
-    downloader::Downloader,
+    downloader::{Downloader, DurationViolation, DurationViolationKind, check_duration},
     parser::get_title_and_perfomer,
 };
+
+/// Articles that only insert an informational text and must not trigger a download.
+fn is_notice_id(result_id: &str) -> bool {
+    [&*NO_RESULTS_ID, &*TOO_LONG_ID, &*TOO_SHORT_ID]
+        .iter()
+        .any(|id| result_id == id.as_str())
+}
+
+/// Localized explanation for a video that breaks the configured duration bounds.
+fn duration_limit_message(locale: &str, kind: DurationViolationKind) -> String {
+    match kind {
+        DurationViolationKind::TooShort => t!(
+            "inline.too_short_text",
+            locale = locale,
+            min_duration = format_duration((*MIN_DURATION).unwrap_or_default())
+        )
+        .to_string(),
+        DurationViolationKind::TooLong => t!(
+            "inline.too_long_text",
+            locale = locale,
+            max_duration = format_duration((*MAX_DURATION).unwrap_or_default())
+        )
+        .to_string(),
+    }
+}
 
 fn decode_temporary_id<S: Into<String>>(result_id: S) -> anyhow::Result<String> {
     let string = result_id.into();
@@ -95,6 +122,10 @@ async fn download_video_inner(
     {
         Ok((video, download_path, thumbnail_path)) => (video, download_path, thumbnail_path),
         Err(e) => {
+            // Keep the duration violation typed so the handler can show a localized message.
+            if e.downcast_ref::<DurationViolation>().is_some() {
+                return Err(e);
+            }
             return Err(anyhow::anyhow!("Failed to download {}: {}", video_id, e));
         }
     };
@@ -176,6 +207,14 @@ pub async fn handle_chosen_inline_result(
         return Ok(());
     };
 
+    if is_notice_id(&chosen_inline_result.result_id) {
+        log::info!(
+            "Chosen informational result {}, leaving the message as is",
+            chosen_inline_result.result_id
+        );
+        return Ok(());
+    }
+
     let locale = detect_locale(&chosen_inline_result.from);
     let user_id = chosen_inline_result.from.id.0;
 
@@ -200,6 +239,28 @@ pub async fn handle_chosen_inline_result(
     let video = {
         if let Some(cached) = data_store.lock().await.get_file_id(&video_id) {
             log::info!("Found cached file_id for {}", video_id);
+
+            // A cached file skips downloading entirely, so the bounds have to be checked here.
+            // Telegram reports an unknown duration as 0, which must not be treated as "too short".
+            let cached_duration = (cached.duration > 0).then_some(cached.duration as f64);
+            if let Some(kind) = check_duration(cached_duration, *MIN_DURATION, *MAX_DURATION) {
+                log::warn!(
+                    "Cached video {} breaks the duration bounds, refusing to send it",
+                    video_id
+                );
+                if let Err(error) = bot
+                    .edit_message_text_inline(
+                        &inline_message_id,
+                        duration_limit_message(locale, kind),
+                    )
+                    .await
+                {
+                    log_request_error("Failed to report duration limit", &error);
+                }
+
+                return Ok(());
+            }
+
             cached
         } else {
             let count = data_store
@@ -248,6 +309,20 @@ pub async fn handle_chosen_inline_result(
             match id {
                 Ok(video) => video,
                 Err(err) => {
+                    if let Some(violation) = err.downcast_ref::<DurationViolation>() {
+                        if let Err(error) = bot
+                            .edit_message_text_inline(
+                                &inline_message_id,
+                                duration_limit_message(locale, violation.kind),
+                            )
+                            .await
+                        {
+                            log_request_error("Failed to report duration limit", &error);
+                        }
+
+                        return Ok(());
+                    }
+
                     let mut error_message = t!(
                         "chosen.error_download",
                         locale = locale,
@@ -336,7 +411,16 @@ pub async fn handle_chosen_inline_result(
 mod tests {
     use teloxide::types::InlineKeyboardButtonKind;
 
-    use super::{decode_temporary_id, get_keyboard};
+    use super::{decode_temporary_id, get_keyboard, is_notice_id};
+    use crate::consts::{NO_RESULTS_ID, TOO_LONG_ID, TOO_SHORT_ID};
+
+    #[test]
+    fn notice_ids_are_recognized() {
+        assert!(is_notice_id(&NO_RESULTS_ID));
+        assert!(is_notice_id(&TOO_LONG_ID));
+        assert!(is_notice_id(&TOO_SHORT_ID));
+        assert!(!is_notice_id("dQw4w9WgXcQ:0.12.0:123456"));
+    }
 
     const ADVERTISE: Option<(&str, &str)> = Some(("Ad", "https://example.com/ad"));
 

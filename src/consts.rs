@@ -6,6 +6,8 @@ pub const CACHE_DIR: &str = "cache";
 pub const DB_PATH: &str = "iytmr.redb";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static NO_RESULTS_ID: LazyLock<String> = LazyLock::new(|| format!("no_results:{}", VERSION));
+pub static TOO_SHORT_ID: LazyLock<String> = LazyLock::new(|| format!("too_short:{}", VERSION));
+pub static TOO_LONG_ID: LazyLock<String> = LazyLock::new(|| format!("too_long:{}", VERSION));
 
 pub static MAX_RESULTS: LazyLock<usize> = LazyLock::new(|| {
     if let Ok(max_results) = std::env::var("MAX_RESULTS")

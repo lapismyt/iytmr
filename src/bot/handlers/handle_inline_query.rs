@@ -14,12 +14,14 @@ use teloxide::{
 use yt_dlp::model::playlist::PlaylistEntry;
 
 use crate::{
-    bot::{detect_locale, errors::log_request_error, types::BotWrapped, video_url},
+    bot::{
+        detect_locale, errors::log_request_error, format_duration, types::BotWrapped, video_url,
+    },
     consts::{
         BLANK_PLACEHOLDER, INLINE_CACHE_TIME, MAX_DURATION, MAX_RESULTS, MIN_DURATION,
-        NO_RESULTS_ID, VERSION,
+        NO_RESULTS_ID, TOO_LONG_ID, TOO_SHORT_ID, VERSION,
     },
-    downloader::Downloader,
+    downloader::{Downloader, DurationViolationKind, check_duration},
     parser::get_title_and_perfomer,
 };
 
@@ -55,6 +57,56 @@ fn downloading_message_text(locale: &str, video_id: &str, performer: &str, title
     let track = html::link(&video_url(video_id), &format!("{} — {}", performer, title));
 
     t!("inline.downloading", locale = locale, track = track).to_string()
+}
+
+/// Builds an article that only inserts an explanatory text and can never be downloaded.
+fn notice_article(bot: &BotWrapped, id: String, title: String, text: String) -> InlineQueryResult {
+    InlineQueryResult::Article(InlineQueryResultArticle {
+        id,
+        title,
+        input_message_content: InputMessageContent::Text(InputMessageContentText {
+            message_text: text,
+            parse_mode: Some(bot.parse_mode()),
+            entities: None,
+            link_preview_options: None,
+        }),
+        reply_markup: None,
+        url: None,
+        description: None,
+        thumbnail_url: None,
+        thumbnail_width: None,
+        thumbnail_height: None,
+    })
+}
+
+/// Builds the "Too short"/"Too long" article for a video that breaks the duration bounds.
+fn duration_notice(
+    bot: &BotWrapped,
+    locale: &str,
+    kind: DurationViolationKind,
+) -> InlineQueryResult {
+    let (id, title, text) = match kind {
+        DurationViolationKind::TooShort => (
+            (*TOO_SHORT_ID).clone(),
+            t!("inline.too_short_title", locale = locale),
+            t!(
+                "inline.too_short_text",
+                locale = locale,
+                min_duration = format_duration((*MIN_DURATION).unwrap_or_default())
+            ),
+        ),
+        DurationViolationKind::TooLong => (
+            (*TOO_LONG_ID).clone(),
+            t!("inline.too_long_title", locale = locale),
+            t!(
+                "inline.too_long_text",
+                locale = locale,
+                max_duration = format_duration((*MAX_DURATION).unwrap_or_default())
+            ),
+        ),
+    };
+
+    notice_article(bot, id, title.to_string(), text.to_string())
 }
 
 fn playlist_entry_to_inline_query_result_article(
@@ -152,6 +204,24 @@ pub async fn handle_inline_query(
             }
         };
 
+        if let Some(kind) = check_duration(
+            video.duration.map(|duration| duration as f64),
+            *MIN_DURATION,
+            *MAX_DURATION,
+        ) {
+            let results = vec![duration_notice(&bot, locale, kind)];
+
+            if let Err(e) = bot
+                .answer_inline_query(inline_query.id, results)
+                .cache_time(*INLINE_CACHE_TIME)
+                .await
+            {
+                log_request_error("Failed to answer inline query", &e);
+            }
+
+            return Ok(());
+        }
+
         let entry = PlaylistEntry {
             id: video.id.clone(),
             title: video.title.clone(),
@@ -198,22 +268,12 @@ pub async fn handle_inline_query(
         .collect();
 
     if results.is_empty() {
-        results.push(InlineQueryResult::Article(InlineQueryResultArticle {
-            id: NO_RESULTS_ID.to_string(),
-            title: t!("inline.no_results_title", locale = locale).to_string(),
-            input_message_content: InputMessageContent::Text(InputMessageContentText {
-                message_text: t!("inline.no_results_text", locale = locale).to_string(),
-                parse_mode: Some(bot.parse_mode()),
-                entities: None,
-                link_preview_options: None,
-            }),
-            reply_markup: None,
-            url: None,
-            description: None,
-            thumbnail_url: None,
-            thumbnail_width: None,
-            thumbnail_height: None,
-        }));
+        results.push(notice_article(
+            &bot,
+            (*NO_RESULTS_ID).clone(),
+            t!("inline.no_results_title", locale = locale).to_string(),
+            t!("inline.no_results_text", locale = locale).to_string(),
+        ));
     }
 
     if let Err(e) = bot
@@ -256,5 +316,34 @@ mod tests {
     fn downloading_message_is_translated() {
         assert!(downloading_message_text("ru", "video-id", "P", "T").contains("Скачивание"));
         assert!(downloading_message_text("uk", "video-id", "P", "T").contains("Завантаження"));
+    }
+
+    #[test]
+    fn duration_notice_texts_are_localized() {
+        for locale in ["en", "ru", "uk"] {
+            let too_long = t!(
+                "inline.too_long_text",
+                locale = locale,
+                max_duration = "10:00"
+            )
+            .to_string();
+            let too_short = t!(
+                "inline.too_short_text",
+                locale = locale,
+                min_duration = "0:01"
+            )
+            .to_string();
+
+            assert!(too_long.contains("10:00"), "locale {locale}: {too_long}");
+            assert!(too_short.contains("0:01"), "locale {locale}: {too_short}");
+            assert!(
+                !too_long.contains("%{"),
+                "locale {locale} has raw placeholders"
+            );
+            assert!(
+                !too_short.contains("%{"),
+                "locale {locale} has raw placeholders"
+            );
+        }
     }
 }
