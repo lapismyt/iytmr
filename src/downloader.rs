@@ -26,6 +26,17 @@ pub struct Downloader {
 
 const AUDIO_PREPARATION_MAX_ATTEMPTS: usize = 10;
 
+/// Target integrated loudness for every track. Matching this across tracks keeps a
+/// whole playlist at a comparable average level without touching intra-track dynamics.
+const TARGET_LOUDNESS_LUFS: f64 = -14.0;
+/// True-peak ceiling. A little below 0 dBTP leaves room for the mp3 encoder's overshoot.
+const TARGET_TRUE_PEAK_DBTP: f64 = -1.5;
+/// Never boost a quiet track more than this. Larger positive gains mostly raise the
+/// noise floor, so keeping quality takes priority over matching the average perfectly.
+const MAX_BOOST_DB: f64 = 12.0;
+/// Gains below this are inaudible and only cost a needless filter pass.
+const AUDIBLE_GAIN_DB: f64 = 0.1;
+
 /// How a video's duration breaks the configured `MIN_DURATION`/`MAX_DURATION` bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurationViolationKind {
@@ -76,6 +87,39 @@ pub fn check_duration(
     }
 
     None
+}
+
+/// Computes a single constant gain that brings a track's integrated loudness to
+/// [`TARGET_LOUDNESS_LUFS`] while preserving its internal dynamics.
+///
+/// The gain is transparent: it is applied uniformly to the whole track, so quiet and
+/// loud passages keep their original relationship. Positive gain is capped by the
+/// true-peak headroom and by [`MAX_BOOST_DB`] to avoid clipping and pumping up noise;
+/// attenuation is always applied in full. Returns `None` when loudness is unknown
+/// (e.g. silence reported as `-inf`), in which case the track is left untouched.
+fn compute_normalization_gain(input_i: f64, input_tp: f64) -> Option<f64> {
+    if !input_i.is_finite() {
+        return None;
+    }
+
+    let mut gain = TARGET_LOUDNESS_LUFS - input_i;
+
+    if gain > 0.0 {
+        // `input_tp == -inf` (or NaN) yields an infinite/ignored headroom, so only the
+        // boost cap applies; `f64::min` already ignores NaN.
+        gain = gain.min(TARGET_TRUE_PEAK_DBTP - input_tp).min(MAX_BOOST_DB);
+    }
+
+    if !gain.is_finite() {
+        return None;
+    }
+
+    let gain = (gain * 10.0).round() / 10.0;
+    Some(if gain.abs() < AUDIBLE_GAIN_DB {
+        0.0
+    } else {
+        gain
+    })
 }
 
 impl Downloader {
@@ -307,9 +351,9 @@ impl Downloader {
             return Err(err);
         }
 
-        self.normalize_audio(&audio_path).await?;
+        let gain_db = self.measure_normalization_gain(&audio_path).await?;
 
-        self.add_metadata_manual(&audio_path, video, thumbnail_path)
+        self.add_metadata_manual(&audio_path, video, thumbnail_path, gain_db)
             .await?;
 
         if let Err(err) = self
@@ -603,12 +647,13 @@ impl Downloader {
         Ok(())
     }
 
-    async fn normalize_audio(&self, audio_path: &Path) -> anyhow::Result<()> {
-        let target_i = "-14.0";
-        let target_tp = "-1.0";
-        let target_lra = "7.0";
-
-        // Pass 1: measure loudness
+    /// Measures the track's loudness and true peak and returns the constant gain that
+    /// should be applied to the whole file.
+    ///
+    /// Analysis is lossless (`-f null`), so it does not add another encoding pass. Any
+    /// failure to measure is non-fatal: the track is returned without normalization
+    /// rather than failing the whole download.
+    async fn measure_normalization_gain(&self, audio_path: &Path) -> anyhow::Result<Option<f64>> {
         let analyze_output = tokio::process::Command::new(&self.ffmpeg_path)
             .arg("-i")
             .arg(audio_path)
@@ -616,79 +661,66 @@ impl Downloader {
             .output()
             .await?;
 
+        if !analyze_output.status.success() {
+            log::warn!(
+                "Loudness analysis failed for {}, leaving track unnormalized: {}",
+                audio_path.display(),
+                String::from_utf8_lossy(&analyze_output.stderr)
+                    .chars()
+                    .take(500)
+                    .collect::<String>()
+            );
+            return Ok(None);
+        }
+
         let analyze_stderr = String::from_utf8_lossy(&analyze_output.stderr);
-        let Some(json_start) = analyze_stderr.find('{') else {
-            log::error!(
-                "ffmpeg loudnorm stderr for {}: {}",
+        let (Some(json_start), Some(json_end)) =
+            (analyze_stderr.find('{'), analyze_stderr.rfind('}'))
+        else {
+            log::warn!(
+                "Could not locate loudnorm JSON for {}, leaving track unnormalized: {}",
                 audio_path.display(),
-                &analyze_stderr[..analyze_stderr.len().min(500)]
+                analyze_stderr.chars().take(500).collect::<String>()
             );
-            anyhow::bail!(
-                "Failed to parse loudnorm analysis output for {}",
-                audio_path.display()
-            );
-        };
-        let Some(json_end) = analyze_stderr.rfind('}') else {
-            log::error!(
-                "ffmpeg loudnorm stderr for {} (no closing brace): {}",
-                audio_path.display(),
-                &analyze_stderr[..analyze_stderr.len().min(500)]
-            );
-            anyhow::bail!(
-                "Failed to parse loudnorm analysis output for {}",
-                audio_path.display()
-            );
+            return Ok(None);
         };
         let json_str = &analyze_stderr[json_start..=json_end];
 
-        let parsed: serde_json::Value = serde_json::from_str(json_str)?;
-        let input_i = parsed["input_i"].as_str().unwrap_or("-24.0");
-        let input_tp = parsed["input_tp"].as_str().unwrap_or("-1.0");
-        let input_lra = parsed["input_lra"].as_str().unwrap_or("7.0");
-        let input_thresh = parsed["input_thresh"].as_str().unwrap_or("-34.0");
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) else {
+            log::warn!(
+                "Could not parse loudnorm JSON for {}, leaving track unnormalized",
+                audio_path.display()
+            );
+            return Ok(None);
+        };
 
+        let number = |key: &str| {
+            parsed
+                .get(key)
+                .and_then(|value| value.as_str())
+                .and_then(|value| value.parse::<f64>().ok())
+        };
+        let Some(input_i) = number("input_i") else {
+            log::warn!(
+                "Loudnorm output for {} has no usable input_i, leaving track unnormalized",
+                audio_path.display()
+            );
+            return Ok(None);
+        };
+        // A missing/unusable true peak only removes the peak cap; an actual `-inf`
+        // (silence) parses as negative infinity and leaves unlimited headroom.
+        let input_tp = number("input_tp").unwrap_or(f64::NEG_INFINITY);
+
+        let gain = compute_normalization_gain(input_i, input_tp);
         log::info!(
-            "Loudnorm analysis for {}: I={} TP={} LRA={} thresh={}",
+            "Loudness analysis for {}: I={:.1} LUFS, TP={:.1} dBTP, gain={} dB",
             audio_path.display(),
             input_i,
             input_tp,
-            input_lra,
-            input_thresh,
+            gain.map_or_else(|| "none".to_string(), |gain| format!("{gain:+.1}")),
         );
 
-        // Pass 2: apply normalization
-        let temp_path = audio_path.with_extension("norm.mp3");
-        let status = tokio::process::Command::new(&self.ffmpeg_path)
-            .arg("-i")
-            .arg(audio_path)
-            .args([
-                "-af",
-                &format!(
-                    "loudnorm=I={}:TP={}:LRA={}:measured_I={}:measured_TP={}:measured_LRA={}:measured_thresh={}:linear=true",
-                    target_i, target_tp, target_lra, input_i, input_tp, input_lra, input_thresh,
-                ),
-                "-c:a",
-                "libmp3lame",
-                "-q:a",
-                "2",
-                "-y",
-            ])
-            .arg(&temp_path)
-            .output()
-            .await?;
-
-        if !status.status.success() {
-            let error = String::from_utf8_lossy(&status.stderr);
-            let _ = tokio::fs::remove_file(&temp_path).await;
-            anyhow::bail!(
-                "ffmpeg loudnorm failed for {}: {}",
-                audio_path.display(),
-                error
-            );
-        }
-
-        tokio::fs::rename(&temp_path, audio_path).await?;
-        Ok(())
+        Ok(gain)
     }
 
     async fn add_metadata_manual(
@@ -696,6 +728,7 @@ impl Downloader {
         audio_path: &Path,
         video: &Video,
         thumbnail_path: Option<&Path>,
+        gain_db: Option<f64>,
     ) -> anyhow::Result<()> {
         let temp_path = audio_path.with_extension("temp.mp3");
         let mut cmd = tokio::process::Command::new(&self.ffmpeg_path);
@@ -724,6 +757,13 @@ impl Downloader {
         } else {
             // Just re-encode audio to mp3
             cmd.args(["-c:a", "libmp3lame", "-q:a", "2"]);
+        }
+
+        // Apply one constant gain to the whole track. Unlike `loudnorm`, this never
+        // compresses loud/quiet passages against each other, so the author's dynamics
+        // survive intact.
+        if let Some(gain_db) = gain_db.filter(|gain| *gain != 0.0) {
+            cmd.arg("-af").arg(format!("volume={gain_db:.1}dB"));
         }
 
         // ID3v2 version for better compatibility
@@ -781,7 +821,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Downloader, DurationViolationKind, check_duration};
+    use super::{Downloader, DurationViolationKind, check_duration, compute_normalization_gain};
 
     #[test]
     fn duration_within_bounds_is_allowed() {
@@ -946,5 +986,54 @@ mod tests {
         Downloader::ensure_non_empty_audio(&audio_path)
             .await
             .expect("downloaded audio must be accepted");
+    }
+
+    #[test]
+    fn loud_track_is_attenuated_by_full_difference() {
+        assert_eq!(compute_normalization_gain(-8.0, -0.1), Some(-6.0));
+    }
+
+    #[test]
+    fn attenuation_is_never_capped_by_peaks() {
+        assert_eq!(compute_normalization_gain(-6.0, 0.5), Some(-8.0));
+    }
+
+    #[test]
+    fn quiet_track_with_headroom_is_capped_at_max_boost() {
+        // 16 dB needed, peak headroom allows 18.5 dB, but the boost cap is 12 dB.
+        assert_eq!(compute_normalization_gain(-30.0, -20.0), Some(12.0));
+    }
+
+    #[test]
+    fn quiet_track_with_high_peaks_is_capped_by_true_peak_headroom() {
+        // 10 dB needed, but only 1.5 dB of headroom below -1.5 dBTP.
+        assert_eq!(compute_normalization_gain(-24.0, -3.0), Some(1.5));
+    }
+
+    #[test]
+    fn track_already_at_target_needs_no_gain() {
+        assert_eq!(compute_normalization_gain(-14.0, -2.0), Some(0.0));
+        assert_eq!(compute_normalization_gain(-14.04, -2.0), Some(0.0));
+    }
+
+    #[test]
+    fn silence_is_left_untouched() {
+        assert_eq!(
+            compute_normalization_gain(f64::NEG_INFINITY, f64::NEG_INFINITY),
+            None
+        );
+    }
+
+    #[test]
+    fn non_finite_loudness_is_left_untouched() {
+        assert_eq!(compute_normalization_gain(f64::NAN, -2.0), None);
+    }
+
+    #[test]
+    fn missing_true_peak_only_removes_the_peak_cap() {
+        assert_eq!(
+            compute_normalization_gain(-40.0, f64::NEG_INFINITY),
+            Some(12.0)
+        );
     }
 }
